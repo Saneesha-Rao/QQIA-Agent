@@ -439,6 +439,15 @@ export class QQIABot extends TeamsActivityHandler {
     // Detect personal pronouns — "I", "my", "me" → filter to user's tasks
     const isPersonal = /\b(i |i'[a-z]|my |me |mine)\b/.test(text) || text.startsWith('do i ') || text.startsWith('what do i');
 
+    // Detect third-person name references like "Amit Tiwari's tasks", "what does John need to"
+    let mentionedPerson: string | null = null;
+    const possessiveMatch = text.match(/(?:what(?:'s| is| are)\s+)?(\w[\w\s]*?)'s\s+(?:tasks?|activities|steps|items|work|upcoming)/i);
+    const forMatch = text.match(/(?:tasks?|activities|steps|work|upcoming)\s+(?:for|of|assigned to)\s+(\w[\w\s]*?)(?:\s+(?:this|next|that|due|need)|[?.]|$)/i);
+    const doesMatch = text.match(/what\s+(?:does|should|will|can)\s+(\w[\w\s]*?)\s+(?:need|have|do|start|complete|own)/i);
+    if (possessiveMatch) mentionedPerson = possessiveMatch[1].trim();
+    else if (forMatch) mentionedPerson = forMatch[1].trim();
+    else if (doesMatch) mentionedPerson = doesMatch[1].trim();
+
     // Detect time-window keywords and extract days
     const timeMatch = text.match(/(?:this|next)\s+(\d+\s+)?(week|month|sprint)|(?:next|coming|upcoming)\s+(\d+)\s+days?|(?:in the next|within)\s+(\d+)\s+days?/i);
     let lookAheadDays = 7;
@@ -448,8 +457,14 @@ export class QQIABot extends TeamsActivityHandler {
       else if (timeMatch[4]) lookAheadDays = parseInt(timeMatch[4]);
     }
 
+    // Third-person name + activity/task query → show THEIR tasks
+    if (mentionedPerson && (text.includes('task') || text.includes('activities') || text.includes('step') ||
+        text.includes('need') || text.includes('start') || text.includes('do') ||
+        text.includes('due') || text.includes('upcoming') || text.includes('work') ||
+        text.includes('this week') || text.includes('this month'))) {
+      await this.handleMyUpcoming(context, mentionedPerson, lookAheadDays);
     // Personal + activity/task/upcoming query → show MY upcoming tasks
-    if (isPersonal && (text.includes('activities') || text.includes('task') || text.includes('upcoming') ||
+    } else if (isPersonal && (text.includes('activities') || text.includes('task') || text.includes('upcoming') ||
         text.includes('need to') || text.includes('start') || text.includes('do') ||
         text.includes('due') || text.includes('pending') || text.includes('this week') ||
         text.includes('next week') || text.includes('this month') || text.includes('assigned') ||
