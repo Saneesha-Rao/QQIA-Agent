@@ -90,9 +90,12 @@ export class QQIABot extends TeamsActivityHandler {
       return;
     }
     // Fix common typos for key commands
-    text = text.replace(/^statis\b/, 'status').replace(/^staus\b/, 'status')
-               .replace(/^updat\b/, 'update').replace(/^udpate\b/, 'update')
-               .replace(/^comlete\b/, 'complete').replace(/^complte\b/, 'complete');
+    text = text.replace(/\bstatis\b/g, 'status').replace(/\bstaus\b/g, 'status')
+               .replace(/\budpate\b/g, 'update').replace(/\bupdat\b/g, 'update')
+               .replace(/\bcomlete\b/g, 'complete').replace(/\bcomplte\b/g, 'complete')
+               .replace(/\btaks\b/g, 'tasks').replace(/\btask\b/g, 'tasks')
+               .replace(/\bactivites\b/g, 'activities').replace(/\bactivitys\b/g, 'activities')
+               .replace(/\bworksteam\b/g, 'workstream').replace(/\bworkstrem\b/g, 'workstream');
     const userName = context.activity.from.name || 'Unknown';
 
     try {
