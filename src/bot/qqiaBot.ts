@@ -76,7 +76,12 @@ export class QQIABot extends TeamsActivityHandler {
 
   /** Main message handler - routes intents to appropriate handlers */
   private async handleMessage(context: TurnContext): Promise<void> {
-    const text = (context.activity.text || '').trim().toLowerCase();
+    // Normalize: lowercase, collapse extra spaces, fix common typos
+    let text = (context.activity.text || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    // Fix common typos for key commands
+    text = text.replace(/^statis\b/, 'status').replace(/^staus\b/, 'status')
+               .replace(/^updat\b/, 'update').replace(/^udpate\b/, 'update')
+               .replace(/^comlete\b/, 'complete').replace(/^complte\b/, 'complete');
     const userName = context.activity.from.name || 'Unknown';
 
     try {
@@ -403,6 +408,20 @@ export class QQIABot extends TeamsActivityHandler {
 
   /** Fallback handler for natural language queries */
   private async handleNaturalLanguage(context: TurnContext, text: string, userName: string): Promise<void> {
+    // Check if user typed a bare step ID (e.g., "1.C" or "2.D")
+    const stepId = this.extractStepId(text);
+    if (stepId && text.replace(/\s/g, '').length <= stepId.length + 2) {
+      // Bare step ID — treat as status query
+      await this.handleStepQuery(context, `status ${stepId}`);
+      return;
+    }
+
+    // Check if message contains "to" pattern like "update 1.C to completed"
+    if (stepId && (text.includes(' to ') || text.includes('completed') || text.includes('done') || text.includes('in progress') || text.includes('blocked'))) {
+      await this.handleStatusUpdate(context, text, userName);
+      return;
+    }
+
     // Try to match common patterns
     if (text.includes('how many') || text.includes('count') || text.includes('total')) {
       await this.handleSummary(context);
@@ -475,9 +494,19 @@ export class QQIABot extends TeamsActivityHandler {
 
   // ---- Utilities ----
 
-  /** Extract step ID from user message (e.g., "1.A", "2.B.1") */
+  /** Extract step ID from user message (e.g., "1.A", "2.B.1") — handles spaces around dots and normalizes to uppercase */
   private extractStepId(text: string): string | null {
-    const match = text.match(/\b(\d+\.\w+(?:\.\d+)?)\b/);
-    return match ? match[1] : null;
+    // First try exact match like "1.A" or "2.B.1"
+    let match = text.match(/\b(\d+)\s*\.\s*(\w+(?:\s*\.\s*\d+)?)\b/);
+    if (match) {
+      // Remove all spaces and uppercase the letter part: "1 . c" → "1.C"
+      return (match[1] + '.' + match[2]).replace(/\s/g, '').toUpperCase();
+    }
+    // Also try just a number+letter combo like "1A" → "1.A"
+    match = text.match(/\b(\d+)([A-Za-z])\b/);
+    if (match) {
+      return match[1] + '.' + match[2].toUpperCase();
+    }
+    return null;
   }
 }
