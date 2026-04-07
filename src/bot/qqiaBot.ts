@@ -76,8 +76,19 @@ export class QQIABot extends TeamsActivityHandler {
 
   /** Main message handler - routes intents to appropriate handlers */
   private async handleMessage(context: TurnContext): Promise<void> {
+    // Handle Adaptive Card Action.Submit button clicks (value is set, text is empty)
+    const actionData = context.activity.value;
+    if (actionData?.action) {
+      await this.handleCardSubmitAction(context, actionData);
+      return;
+    }
+
     // Normalize: lowercase, collapse extra spaces, fix common typos
     let text = (context.activity.text || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    if (!text) {
+      await context.sendActivity('Please type a command or **help** to see available options.');
+      return;
+    }
     // Fix common typos for key commands
     text = text.replace(/^statis\b/, 'status').replace(/^staus\b/, 'status')
                .replace(/^updat\b/, 'update').replace(/^udpate\b/, 'update')
@@ -446,6 +457,52 @@ export class QQIABot extends TeamsActivityHandler {
         `- **update 1.A completed** → Update a step\n` +
         `- **help** → Full command list`
       );
+    }
+  }
+
+  /** Handle Action.Submit button clicks from Adaptive Cards (sent as message with value) */
+  private async handleCardSubmitAction(context: TurnContext, data: any): Promise<void> {
+    const userName = context.activity.from.name || 'Unknown';
+
+    switch (data.action) {
+      case 'update_status':
+        await this.dataService.updateStepStatus(data.stepId, data.field, data.newStatus, userName, 'bot');
+        await context.sendActivity(`✅ Step **${data.stepId}** updated to **${data.newStatus}**`);
+        break;
+
+      case 'view_step':
+        const step = await this.dataService.getStep(data.stepId);
+        if (step) {
+          this.dependencyEngine.buildGraph(await this.dataService.getAllSteps());
+          const card = buildStepDetailCard(
+            step,
+            this.dependencyEngine.getBlockers(data.stepId),
+            this.dependencyEngine.getBlockedBy(data.stepId)
+          );
+          await context.sendActivity(MessageFactory.attachment(CardFactory.adaptiveCard(card)));
+        } else {
+          await context.sendActivity(`Step **${data.stepId}** not found.`);
+        }
+        break;
+
+      case 'view_overdue':
+        await this.handleOverdue(context);
+        break;
+
+      case 'view_blocked':
+        await this.handleBlockers(context);
+        break;
+
+      case 'critical_path':
+        await this.handleCriticalPath(context);
+        break;
+
+      case 'dashboard':
+        await this.handleDashboard(context, data.track || 'Corp');
+        break;
+
+      default:
+        await context.sendActivity(`Unknown action: ${data.action}. Type **help** for commands.`);
     }
   }
 
