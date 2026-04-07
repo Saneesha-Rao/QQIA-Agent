@@ -25,6 +25,10 @@ export const config = {
     excelItemId: process.env.EXCEL_ITEM_ID || '',
     excelFilePath: process.env.EXCEL_FILE_PATH || '',
   },
+  powerAutomate: {
+    readFlowUrl: process.env.PA_READ_FLOW_URL || '',
+    writeFlowUrl: process.env.PA_WRITE_FLOW_URL || '',
+  },
   notifications: {
     channelId: process.env.NOTIFICATION_CHANNEL_ID || '',
     teamId: process.env.NOTIFICATION_TEAM_ID || '',

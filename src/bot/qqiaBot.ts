@@ -8,6 +8,8 @@ import {
 import { DataService } from '../services/dataService';
 import { DependencyEngine } from '../services/dependencyEngine';
 import { ExcelSyncService } from '../services/excelSyncService';
+import { PowerAutomateSyncService } from '../services/powerAutomateSyncService';
+import { ExcelComSyncService } from '../services/excelComSyncService';
 import { NotificationService } from '../services/notificationService';
 import { RolloverStep } from '../models/types';
 import {
@@ -26,18 +28,24 @@ export class QQIABot extends TeamsActivityHandler {
   private dependencyEngine: DependencyEngine;
   private excelSync: ExcelSyncService;
   private notificationService: NotificationService;
+  private paSyncService?: PowerAutomateSyncService;
+  private comSync?: ExcelComSyncService;
 
   constructor(
     dataService: DataService,
     dependencyEngine: DependencyEngine,
     excelSync: ExcelSyncService,
-    notificationService: NotificationService
+    notificationService: NotificationService,
+    paSyncService?: PowerAutomateSyncService,
+    comSync?: ExcelComSyncService
   ) {
     super();
     this.dataService = dataService;
     this.dependencyEngine = dependencyEngine;
     this.excelSync = excelSync;
     this.notificationService = notificationService;
+    this.paSyncService = paSyncService;
+    this.comSync = comSync;
 
     // Handle incoming messages
     this.onMessage(async (context, next) => {
@@ -242,9 +250,15 @@ export class QQIABot extends TeamsActivityHandler {
 
     const track = isFed ? 'Fed' : 'Corp';
 
-    // Immediately sync to Excel file
+    // Immediately sync to Excel file (COM → Power Automate → local fallback)
     try {
-      const syncCount = await this.excelSync.syncToExcel();
+      if (this.comSync?.isAvailable) {
+        await this.comSync.syncToExcel();
+      } else if (this.paSyncService?.isConfigured) {
+        await this.paSyncService.syncToExcel();
+      } else {
+        await this.excelSync.syncToExcel();
+      }
       await context.sendActivity(
         `✅ Step **${stepId}** ${track} status updated to **${newStatus}** by ${userName}.` +
         (newStatus === 'Completed' ? `\nCompleted date set to ${new Date().toISOString().split('T')[0]}.` : '') +

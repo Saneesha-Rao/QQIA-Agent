@@ -11,6 +11,8 @@ import { DataService } from './services/dataService';
 import { InMemoryDataService } from './services/inMemoryDataService';
 import { DependencyEngine } from './services/dependencyEngine';
 import { ExcelSyncService } from './services/excelSyncService';
+import { PowerAutomateSyncService } from './services/powerAutomateSyncService';
+import { ExcelComSyncService } from './services/excelComSyncService';
 import { NotificationService } from './services/notificationService';
 import { GraphService } from './services/graphService';
 import { SyncEngine } from './services/syncEngine';
@@ -28,6 +30,8 @@ const dataService: DataService | InMemoryDataService = useCosmosDB
 const dependencyEngine = new DependencyEngine();
 const graphService = new GraphService();
 const excelSync = new ExcelSyncService(dataService as any);
+const paSyncService = new PowerAutomateSyncService(dataService as any);
+const comSync = new ExcelComSyncService(dataService as any);
 const notificationService = new NotificationService(dataService as any, dependencyEngine);
 
 // ---- Bot Framework Setup ----
@@ -55,8 +59,8 @@ adapter.onTurnError = async (context: TurnContext, error: Error) => {
 const proactiveMessenger = new ProactiveMessenger(adapter, config.bot.appId, dataService as any, notificationService);
 const syncEngine = new SyncEngine(dataService as any, graphService, dependencyEngine, notificationService);
 
-// Create the bot with all services
-const bot = new QQIABot(dataService as any, dependencyEngine, excelSync, notificationService);
+// Create the bot with all services (pass PA sync and COM sync for SharePoint write-back)
+const bot = new QQIABot(dataService as any, dependencyEngine, excelSync, notificationService, paSyncService, comSync);
 
 // ---- HTTP Server ----
 const server = restify.createServer();
@@ -131,10 +135,18 @@ server.post('/api/automation/status', async (req, res) => {
       await proactiveMessenger.deliverPredecessorNotifications(stepId, track || 'Corp');
     }
 
-    // Sync to Excel immediately
+    // Sync to Excel immediately (COM → Power Automate → Graph API → local file fallback)
     try {
-      const syncCount = await excelSync.syncToExcel();
-      console.log(`Automation update: synced ${syncCount} step(s) to Excel`);
+      if (comSync.isAvailable) {
+        const syncCount = await comSync.syncToExcel();
+        console.log(`Automation update: synced ${syncCount} step(s) via Excel COM`);
+      } else if (paSyncService.isConfigured) {
+        const syncCount = await paSyncService.syncToExcel();
+        console.log(`Automation update: synced ${syncCount} step(s) via Power Automate`);
+      } else {
+        const syncCount = await excelSync.syncToExcel();
+        console.log(`Automation update: synced ${syncCount} step(s) to Excel`);
+      }
     } catch (syncErr: any) {
       console.warn(`Automation update: Excel sync failed: ${syncErr.message}`);
     }
@@ -147,13 +159,20 @@ server.post('/api/automation/status', async (req, res) => {
 
 // ---- Scheduled Tasks ----
 
-/** Excel sync via Graph API (every 15 minutes) */
+/** Excel sync: Power Automate → Graph API → local file (every 15 minutes) */
 function startSyncScheduler() {
   setInterval(async () => {
     try {
       console.log(`[Sync] Starting bi-directional Excel sync...`);
-      const result = await syncEngine.runSync();
-      console.log(`[Sync] Complete: ${result.fromExcel} from Excel, ${result.toExcel} to Excel, ${result.conflicts.length} conflicts`);
+      if (paSyncService.isConfigured) {
+        // Power Automate sync (no app registration needed)
+        const result = await paSyncService.fullSync();
+        console.log(`[Sync] PA sync: ${result.fromExcel} from Excel, ${result.toExcel} to Excel`);
+      } else {
+        // Graph API or local file sync
+        const result = await syncEngine.runSync();
+        console.log(`[Sync] Complete: ${result.fromExcel} from Excel, ${result.toExcel} to Excel, ${result.conflicts.length} conflicts`);
+      }
     } catch (err: any) {
       console.error(`[Sync] Error: ${err.message}`);
       // Fallback to local sync
