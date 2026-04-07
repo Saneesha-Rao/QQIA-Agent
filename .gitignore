@@ -4,3 +4,5 @@ dist/
 *.zip
 .env.local
 .env.production
+
+data/

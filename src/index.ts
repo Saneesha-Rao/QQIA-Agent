@@ -15,10 +15,6 @@ import { NotificationService } from './services/notificationService';
 import { GraphService } from './services/graphService';
 import { SyncEngine } from './services/syncEngine';
 import { ProactiveMessenger } from './services/proactiveMessenger';
-import {
-  parseRolloverRow,
-  parseMilestoneRow,
-} from './utils/excelParser';
 import * as XLSX from 'xlsx';
 
 dotenv.config();
@@ -135,6 +131,14 @@ server.post('/api/automation/status', async (req, res) => {
       await proactiveMessenger.deliverPredecessorNotifications(stepId, track || 'Corp');
     }
 
+    // Sync to Excel immediately
+    try {
+      const syncCount = await excelSync.syncToExcel();
+      console.log(`Automation update: synced ${syncCount} step(s) to Excel`);
+    } catch (syncErr: any) {
+      console.warn(`Automation update: Excel sync failed: ${syncErr.message}`);
+    }
+
     res.send(200, { success: true, step: updated });
   } catch (err: any) {
     res.send(500, { error: err.message });
@@ -212,6 +216,8 @@ async function main() {
     if (config.graph.clientId) {
       await graphService.initialize();
       console.log('✅ Graph API initialized');
+      // Enable Graph mode on ExcelSyncService — reads/writes go directly to SharePoint
+      excelSync.enableGraphApi(graphService);
     } else {
       console.warn('⚠️ Graph API credentials not configured. Using local Excel file only.');
     }
@@ -221,38 +227,9 @@ async function main() {
 
   // Seed data from Excel into the data store on startup
   try {
-    const excelPath = 'C:\\Users\\salingal\\OneDrive - Microsoft\\Seller Incentives\\QQIA\\FY27_Mint_RolloverTimeline.xlsx';
-    const wb = XLSX.readFile(excelPath);
-
-    // Import FY27_Rollover steps
-    const rolloverSheet = wb.Sheets['FY27_Rollover'];
-    if (rolloverSheet) {
-      const rows: any[][] = XLSX.utils.sheet_to_json(rolloverSheet, { header: 1, defval: '' });
-      let stepCount = 0;
-      for (let i = 3; i < rows.length; i++) {
-        const step = parseRolloverRow(rows[i], i);
-        if (step) {
-          await dataService.upsertStep(step);
-          stepCount++;
-        }
-      }
-      console.log(`📊 Loaded ${stepCount} rollover steps from Excel`);
-    }
-
-    // Import milestones
-    const msSheet = wb.Sheets['HighLevelMilestones'];
-    if (msSheet) {
-      const msRows: any[][] = XLSX.utils.sheet_to_json(msSheet, { header: 1, defval: '' });
-      let msCount = 0;
-      for (let i = 2; i < msRows.length; i++) {
-        const ms = parseMilestoneRow(msRows[i], i);
-        if (ms) {
-          await dataService.upsertMilestone(ms);
-          msCount++;
-        }
-      }
-      console.log(`🏁 Loaded ${msCount} milestones from Excel`);
-    }
+    const importResult = await excelSync.importFromExcel();
+    console.log(`📊 Loaded ${importResult.steps} rollover steps from Excel`);
+    console.log(`🏁 Loaded ${importResult.milestones} milestones from Excel`);
 
     // Build dependency graph
     const allSteps = await dataService.getAllSteps();

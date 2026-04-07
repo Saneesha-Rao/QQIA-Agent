@@ -105,7 +105,7 @@ export function buildUnblockedCard(notification: Notification): any {
         ],
       },
       { type: 'TextBlock', text: notification.message, wrap: true, spacing: 'Medium' },
-      { type: 'TextBlock', text: `**Your step ${step.id}**: ${step.description}`, wrap: true },
+      { type: 'TextBlock', text: `**Your ${step.id}**: ${step.description}`, wrap: true },
       {
         type: 'FactSet',
         facts: [
