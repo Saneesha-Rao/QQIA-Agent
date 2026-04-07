@@ -35,12 +35,17 @@ const excelSync = new ExcelSyncService(dataService as any);
 const notificationService = new NotificationService(dataService as any, dependencyEngine);
 
 // ---- Bot Framework Setup ----
-const botFrameworkAuth = new ConfigurationBotFrameworkAuthentication({
-  MicrosoftAppId: config.bot.appId,
-  MicrosoftAppPassword: config.bot.appPassword,
-  MicrosoftAppTenantId: config.bot.tenantId,
-  MicrosoftAppType: 'SingleTenant',
-});
+const isLocalDev = !config.bot.appId;
+const botFrameworkAuth = new ConfigurationBotFrameworkAuthentication(
+  isLocalDev
+    ? {} // Empty config allows anonymous access for local Bot Emulator testing
+    : {
+        MicrosoftAppId: config.bot.appId,
+        MicrosoftAppPassword: config.bot.appPassword,
+        MicrosoftAppTenantId: config.bot.tenantId,
+        MicrosoftAppType: 'SingleTenant',
+      }
+);
 
 const adapter = new CloudAdapter(botFrameworkAuth);
 
@@ -72,7 +77,7 @@ server.post('/api/messages', async (req, res) => {
 });
 
 // Health check endpoint with status details
-server.get('/api/health', async (req, res, next) => {
+server.get('/api/health', async (req, res) => {
   let stepCount = 0;
   try {
     const steps = await dataService.getAllSteps();
@@ -86,27 +91,25 @@ server.get('/api/health', async (req, res, next) => {
     registeredUsers: proactiveMessenger.getRegisteredUserCount(),
     trackedSteps: stepCount,
   });
-  next();
 });
 
 // Manual sync trigger endpoint (webhook for Power Automate / Logic Apps)
-server.post('/api/sync', async (req, res, next) => {
+server.post('/api/sync', async (req, res) => {
   try {
     const result = await syncEngine.runSync();
     res.send(200, result);
   } catch (err: any) {
     res.send(500, { error: err.message });
   }
-  next();
 });
 
 // Webhook for external automation status updates (ADO, pipelines, etc.)
-server.post('/api/automation/status', async (req, res, next) => {
+server.post('/api/automation/status', async (req, res) => {
   try {
     const { stepId, status, track, source, notes } = req.body || {};
     if (!stepId || !status) {
       res.send(400, { error: 'stepId and status are required' });
-      return next();
+      return;
     }
 
     const field = track === 'Fed' ? 'fedStatus' : 'corpStatus';
@@ -116,7 +119,7 @@ server.post('/api/automation/status', async (req, res, next) => {
 
     if (!updated) {
       res.send(404, { error: `Step ${stepId} not found` });
-      return next();
+      return;
     }
 
     // Add notes if provided
@@ -136,7 +139,6 @@ server.post('/api/automation/status', async (req, res, next) => {
   } catch (err: any) {
     res.send(500, { error: err.message });
   }
-  next();
 });
 
 // ---- Scheduled Tasks ----
