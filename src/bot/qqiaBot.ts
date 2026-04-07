@@ -241,11 +241,22 @@ export class QQIABot extends TeamsActivityHandler {
     }
 
     const track = isFed ? 'Fed' : 'Corp';
-    await context.sendActivity(
-      `✅ Step **${stepId}** ${track} status updated to **${newStatus}** by ${userName}.` +
-      (newStatus === 'Completed' ? `\nCompleted date set to ${new Date().toISOString().split('T')[0]}.` : '') +
-      `\n📊 Excel will be synced within 15 minutes.`
-    );
+
+    // Immediately sync to Excel file
+    try {
+      const syncCount = await this.excelSync.syncToExcel();
+      await context.sendActivity(
+        `✅ Step **${stepId}** ${track} status updated to **${newStatus}** by ${userName}.` +
+        (newStatus === 'Completed' ? `\nCompleted date set to ${new Date().toISOString().split('T')[0]}.` : '') +
+        `\n📊 Excel file updated.`
+      );
+    } catch {
+      await context.sendActivity(
+        `✅ Step **${stepId}** ${track} status updated to **${newStatus}** by ${userName}.` +
+        (newStatus === 'Completed' ? `\nCompleted date set to ${new Date().toISOString().split('T')[0]}.` : '') +
+        `\n⚠️ Excel sync pending — will retry on next scheduled sync.`
+      );
+    }
 
     // Trigger dependency notifications if completed
     if (newStatus === 'Completed') {
