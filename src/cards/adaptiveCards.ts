@@ -154,19 +154,30 @@ export function buildStepListCard(title: string, steps: RolloverStep[], track: '
   const statusEmoji = (s: string) =>
     s === 'Completed' ? '✅' : s === 'In Progress' ? '🔄' : s === 'Blocked' ? '🛑' : '⬜';
 
+  // Column headers
+  const header = {
+    type: 'ColumnSet',
+    separator: true,
+    columns: [
+      { type: 'Column', width: '35px', items: [{ type: 'TextBlock', text: 'ID', weight: 'Bolder', size: 'Small' }] },
+      { type: 'Column', width: 'stretch', items: [{ type: 'TextBlock', text: 'Description', weight: 'Bolder', size: 'Small' }] },
+      { type: 'Column', width: '100px', items: [{ type: 'TextBlock', text: 'Grouping', weight: 'Bolder', size: 'Small' }] },
+      { type: 'Column', width: '75px', items: [{ type: 'TextBlock', text: 'Status', weight: 'Bolder', size: 'Small' }] },
+      { type: 'Column', width: '75px', items: [{ type: 'TextBlock', text: 'Due', weight: 'Bolder', size: 'Small' }] },
+    ],
+  };
+
   const items = steps.slice(0, 15).map(step => {
     const status = track === 'Corp' ? step.corpStatus : step.fedStatus;
     const endDate = track === 'Corp' ? step.corpEndDate : step.fedEndDate;
     return {
       type: 'ColumnSet',
       columns: [
-        { type: 'Column', width: '40px', items: [{ type: 'TextBlock', text: step.id, weight: 'Bolder', size: 'Small' }] },
-        { type: 'Column', width: 'stretch', items: [
-          { type: 'TextBlock', text: step.description, size: 'Small', wrap: true },
-          { type: 'TextBlock', text: step.workstream, size: 'Small', isSubtle: true, spacing: 'None' },
-        ] },
-        { type: 'Column', width: '80px', items: [{ type: 'TextBlock', text: `${statusEmoji(status)} ${status}`, size: 'Small' }] },
-        { type: 'Column', width: '80px', items: [{ type: 'TextBlock', text: endDate || 'TBD', size: 'Small', isSubtle: true }] },
+        { type: 'Column', width: '35px', items: [{ type: 'TextBlock', text: step.id, weight: 'Bolder', size: 'Small' }] },
+        { type: 'Column', width: 'stretch', items: [{ type: 'TextBlock', text: step.description, size: 'Small', wrap: true }] },
+        { type: 'Column', width: '100px', items: [{ type: 'TextBlock', text: step.workstream || '-', size: 'Small', wrap: true, isSubtle: true }] },
+        { type: 'Column', width: '75px', items: [{ type: 'TextBlock', text: `${statusEmoji(status)} ${status}`, size: 'Small' }] },
+        { type: 'Column', width: '75px', items: [{ type: 'TextBlock', text: endDate || 'TBD', size: 'Small', isSubtle: true }] },
       ],
     };
   });
@@ -178,6 +189,7 @@ export function buildStepListCard(title: string, steps: RolloverStep[], track: '
     body: [
       { type: 'TextBlock', text: title, size: 'Medium', weight: 'Bolder' },
       { type: 'TextBlock', text: `Showing ${Math.min(steps.length, 15)} of ${steps.length} steps`, isSubtle: true },
+      header,
       ...items,
     ],
   };
@@ -188,16 +200,26 @@ export function buildMyTasksCard(ownerName: string, steps: RolloverStep[]): any 
   const pending = steps.filter(s => s.corpStatus !== 'Completed' && s.corpStatus !== 'N/A');
   const completed = steps.filter(s => s.corpStatus === 'Completed');
 
+  const taskHeader = {
+    type: 'ColumnSet',
+    separator: true,
+    columns: [
+      { type: 'Column', width: '35px', items: [{ type: 'TextBlock', text: 'ID', weight: 'Bolder', size: 'Small' }] },
+      { type: 'Column', width: 'stretch', items: [{ type: 'TextBlock', text: 'Description', weight: 'Bolder', size: 'Small' }] },
+      { type: 'Column', width: '100px', items: [{ type: 'TextBlock', text: 'Grouping', weight: 'Bolder', size: 'Small' }] },
+      { type: 'Column', width: '75px', items: [{ type: 'TextBlock', text: 'Status', weight: 'Bolder', size: 'Small' }] },
+      { type: 'Column', width: '75px', items: [{ type: 'TextBlock', text: 'Due', weight: 'Bolder', size: 'Small' }] },
+    ],
+  };
+
   const taskItems = pending.map(step => ({
     type: 'ColumnSet',
     columns: [
-      { type: 'Column', width: '40px', items: [{ type: 'TextBlock', text: step.id, weight: 'Bolder', size: 'Small' }] },
-      { type: 'Column', width: 'stretch', items: [
-        { type: 'TextBlock', text: step.description, size: 'Small', wrap: true },
-        { type: 'TextBlock', text: step.workstream, size: 'Small', isSubtle: true, spacing: 'None' },
-      ] },
-      { type: 'Column', width: '80px', items: [{ type: 'TextBlock', text: step.corpStatus, size: 'Small' }] },
-      { type: 'Column', width: '80px', items: [{ type: 'TextBlock', text: step.corpEndDate || 'TBD', size: 'Small' }] },
+      { type: 'Column', width: '35px', items: [{ type: 'TextBlock', text: step.id, weight: 'Bolder', size: 'Small' }] },
+      { type: 'Column', width: 'stretch', items: [{ type: 'TextBlock', text: step.description, size: 'Small', wrap: true }] },
+      { type: 'Column', width: '100px', items: [{ type: 'TextBlock', text: step.workstream || '-', size: 'Small', wrap: true, isSubtle: true }] },
+      { type: 'Column', width: '75px', items: [{ type: 'TextBlock', text: step.corpStatus, size: 'Small' }] },
+      { type: 'Column', width: '75px', items: [{ type: 'TextBlock', text: step.corpEndDate || 'TBD', size: 'Small' }] },
     ],
     selectAction: { type: 'Action.Submit', data: { action: 'view_step', stepId: step.id } },
   }));
@@ -209,6 +231,7 @@ export function buildMyTasksCard(ownerName: string, steps: RolloverStep[]): any 
     body: [
       { type: 'TextBlock', text: `📋 Tasks for ${ownerName}`, size: 'Medium', weight: 'Bolder' },
       { type: 'TextBlock', text: `${completed.length} completed, ${pending.length} remaining`, isSubtle: true },
+      taskHeader,
       ...taskItems,
     ],
     actions: [
