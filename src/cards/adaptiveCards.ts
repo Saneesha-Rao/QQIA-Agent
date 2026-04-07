@@ -161,7 +161,10 @@ export function buildStepListCard(title: string, steps: RolloverStep[], track: '
       type: 'ColumnSet',
       columns: [
         { type: 'Column', width: '40px', items: [{ type: 'TextBlock', text: step.id, weight: 'Bolder', size: 'Small' }] },
-        { type: 'Column', width: 'stretch', items: [{ type: 'TextBlock', text: step.description, size: 'Small', wrap: true }] },
+        { type: 'Column', width: 'stretch', items: [
+          { type: 'TextBlock', text: step.description, size: 'Small', wrap: true },
+          { type: 'TextBlock', text: step.workstream, size: 'Small', isSubtle: true, spacing: 'None' },
+        ] },
         { type: 'Column', width: '80px', items: [{ type: 'TextBlock', text: `${statusEmoji(status)} ${status}`, size: 'Small' }] },
         { type: 'Column', width: '80px', items: [{ type: 'TextBlock', text: endDate || 'TBD', size: 'Small', isSubtle: true }] },
       ],
@@ -189,7 +192,10 @@ export function buildMyTasksCard(ownerName: string, steps: RolloverStep[]): any 
     type: 'ColumnSet',
     columns: [
       { type: 'Column', width: '40px', items: [{ type: 'TextBlock', text: step.id, weight: 'Bolder', size: 'Small' }] },
-      { type: 'Column', width: 'stretch', items: [{ type: 'TextBlock', text: step.description, size: 'Small', wrap: true }] },
+      { type: 'Column', width: 'stretch', items: [
+        { type: 'TextBlock', text: step.description, size: 'Small', wrap: true },
+        { type: 'TextBlock', text: step.workstream, size: 'Small', isSubtle: true, spacing: 'None' },
+      ] },
       { type: 'Column', width: '80px', items: [{ type: 'TextBlock', text: step.corpStatus, size: 'Small' }] },
       { type: 'Column', width: '80px', items: [{ type: 'TextBlock', text: step.corpEndDate || 'TBD', size: 'Small' }] },
     ],
