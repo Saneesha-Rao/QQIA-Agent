@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.env
+*.zip
+.env.local
+.env.production

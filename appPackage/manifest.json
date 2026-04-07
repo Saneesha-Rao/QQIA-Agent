@@ -1,0 +1,53 @@
+{
+  "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.16/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.16",
+  "version": "1.0.0",
+  "id": "{{MICROSOFT_APP_ID}}",
+  "developer": {
+    "name": "Seller Incentives - QQIA Team",
+    "websiteUrl": "https://microsoft.com",
+    "privacyUrl": "https://microsoft.com/privacy",
+    "termsOfUseUrl": "https://microsoft.com/terms"
+  },
+  "name": {
+    "short": "QQIA Agent",
+    "full": "QQIA Agent - FY27 Mint Rollover Tracker"
+  },
+  "description": {
+    "short": "Track and manage FY27 Mint Rollover activities",
+    "full": "The QQIA Agent helps manage the FY27 Mint Rollover process by providing real-time status tracking, proactive notifications, dependency visualization, and bi-directional Excel sync. Chat with the bot to check step statuses, update progress, view dashboards, and receive alerts."
+  },
+  "icons": {
+    "color": "color.png",
+    "outline": "outline.png"
+  },
+  "accentColor": "#0078D4",
+  "bots": [
+    {
+      "botId": "{{MICROSOFT_APP_ID}}",
+      "scopes": ["personal", "team", "groupChat"],
+      "supportsFiles": false,
+      "isNotificationOnly": false,
+      "commandLists": [
+        {
+          "scopes": ["personal", "team", "groupChat"],
+          "commands": [
+            { "title": "dashboard", "description": "Show overall rollover progress dashboard" },
+            { "title": "my tasks", "description": "Show your assigned rollover steps" },
+            { "title": "status", "description": "Check status of a specific step (e.g., status 1.A)" },
+            { "title": "update", "description": "Update step status (e.g., update 1.A completed)" },
+            { "title": "blockers", "description": "View all blocked steps" },
+            { "title": "overdue", "description": "View all overdue steps" },
+            { "title": "summary", "description": "Executive summary for leadership" },
+            { "title": "workstream", "description": "View workstream status (e.g., workstream System Rollover)" },
+            { "title": "critical path", "description": "View the current critical path" },
+            { "title": "sync", "description": "Trigger Excel sync manually" },
+            { "title": "help", "description": "Show all available commands" }
+          ]
+        }
+      ]
+    }
+  ],
+  "permissions": ["identity", "messageTeamMembers"],
+  "validDomains": []
+}
