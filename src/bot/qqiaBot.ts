@@ -117,6 +117,9 @@ export class QQIABot extends TeamsActivityHandler {
         await this.handleCriticalPath(context);
       } else if (text === 'summary' || text === 'exec summary' || text.startsWith('leadership')) {
         await this.handleSummary(context);
+      } else if (text === 'upcoming' || text === 'coming up' || text === 'next steps' || text.startsWith('upcoming ')) {
+        const daysMatch = text.match(/(\d+)\s*days?/);
+        await this.handleUpcoming(context, daysMatch ? parseInt(daysMatch[1]) : 7);
       } else if (text.startsWith('tasks for ') || text.startsWith('owner ')) {
         await this.handleOwnerTasks(context, text);
       } else if (text === 'sync' || text === 'refresh') {
@@ -433,30 +436,87 @@ export class QQIABot extends TeamsActivityHandler {
       return;
     }
 
-    // Try to match common patterns
-    if (text.includes('how many') || text.includes('count') || text.includes('total')) {
+    // Detect time-window keywords and extract days
+    const timeMatch = text.match(/(?:this|next)\s+(\d+\s+)?(week|month|sprint)|(?:next|coming|upcoming)\s+(\d+)\s+days?|(?:in the next|within)\s+(\d+)\s+days?/i);
+    let lookAheadDays = 7;
+    if (timeMatch) {
+      if (timeMatch[2] === 'month') lookAheadDays = 30;
+      else if (timeMatch[3]) lookAheadDays = parseInt(timeMatch[3]);
+      else if (timeMatch[4]) lookAheadDays = parseInt(timeMatch[4]);
+    }
+
+    // Upcoming / due / activities / need to be completed / pending / what's next
+    if (text.includes('upcoming') || text.includes('coming up') || text.includes('what\'s next') ||
+        text.includes('whats next') || text.includes('need to be completed') || text.includes('needs to be') ||
+        text.includes('activities') || text.includes('pending') ||
+        text.includes('scheduled') || text.includes('planned') || text.includes('remaining') ||
+        (text.includes('what') && (text.includes('due') || text.includes('deadline') || text.includes('next') || text.includes('left') || text.includes('remain'))) ||
+        text.includes('due soon') || text.includes('due this') || text.includes('due next') ||
+        text.includes('this week') || text.includes('next week') || text.includes('this month')) {
+      await this.handleUpcoming(context, lookAheadDays);
+    } else if (text.includes('how many') || text.includes('count') || text.includes('total') ||
+               text.includes('progress') || text.includes('overview') || text.includes('where are we') ||
+               text.includes('how are we') || text.includes('status update') || text.includes('update me')) {
       await this.handleSummary(context);
-    } else if (text.includes('what') && (text.includes('due') || text.includes('deadline'))) {
-      const allSteps = await this.dataService.getAllSteps();
-      this.dependencyEngine.buildGraph(allSteps);
-      const upcoming = this.dependencyEngine.getUpcomingDeadlines(allSteps, 7, 'Corp');
-      if (upcoming.length > 0) {
-        const card = buildStepListCard('📅 Due This Week', upcoming, 'Corp');
-        await context.sendActivity(MessageFactory.attachment(CardFactory.adaptiveCard(card)));
-      } else {
-        await context.sendActivity('No steps due within the next 7 days.');
-      }
     } else if (text.includes('who') && text.includes('own')) {
       await context.sendActivity('Try: **tasks for [name]** to see tasks for a specific person.');
+    } else if (text.includes('blocker') || text.includes('blocking') || text.includes('stuck') || text.includes('at risk')) {
+      await this.handleBlockers(context);
+    } else if (text.includes('overdue') || text.includes('late') || text.includes('behind') || text.includes('missed')) {
+      await this.handleOverdue(context);
+    } else if (text.includes('summary') || text.includes('leadership') || text.includes('exec') || text.includes('report')) {
+      await this.handleSummary(context);
     } else {
       await context.sendActivity(
         `I didn't understand that. Here are some things you can try:\n\n` +
         `- **dashboard** → Overall progress\n` +
         `- **my tasks** → Your assigned steps\n` +
+        `- **upcoming** → Activities due this week\n` +
         `- **status 1.A** → Check a step\n` +
         `- **update 1.A completed** → Update a step\n` +
+        `- **overdue** → Past-due steps\n` +
+        `- **blockers** → Blocked steps\n` +
+        `- **summary** → Leadership summary\n` +
         `- **help** → Full command list`
       );
+    }
+  }
+
+  /** Show upcoming activities due within N days */
+  private async handleUpcoming(context: TurnContext, days: number = 7): Promise<void> {
+    const allSteps = await this.dataService.getAllSteps();
+    this.dependencyEngine.buildGraph(allSteps);
+
+    const now = new Date();
+    const cutoff = new Date(now.getTime() + days * 86400000);
+    const active = allSteps.filter(s => {
+      if (s.corpStatus === 'Completed' || s.corpStatus === 'N/A') return false;
+      const endDate = s.corpEndDate ? new Date(s.corpEndDate) : null;
+      return endDate && endDate >= now && endDate <= cutoff;
+    }).sort((a, b) => {
+      const da = a.corpEndDate ? new Date(a.corpEndDate).getTime() : Infinity;
+      const db = b.corpEndDate ? new Date(b.corpEndDate).getTime() : Infinity;
+      return da - db;
+    });
+
+    if (active.length > 0) {
+      const label = days <= 7 ? 'This Week' : `Next ${days} Days`;
+      const card = buildStepListCard(`📅 Upcoming Activities — ${label} (${active.length} steps)`, active, 'Corp');
+      await context.sendActivity(MessageFactory.attachment(CardFactory.adaptiveCard(card)));
+    } else {
+      // Fall back to showing all not-started / in-progress items
+      const pending = allSteps.filter(s => s.corpStatus === 'Not Started' || s.corpStatus === 'In Progress')
+        .sort((a, b) => {
+          const da = a.corpEndDate ? new Date(a.corpEndDate).getTime() : Infinity;
+          const db = b.corpEndDate ? new Date(b.corpEndDate).getTime() : Infinity;
+          return da - db;
+        }).slice(0, 20);
+      if (pending.length > 0) {
+        const card = buildStepListCard(`📅 Next Pending Activities (${pending.length} shown)`, pending, 'Corp');
+        await context.sendActivity(MessageFactory.attachment(CardFactory.adaptiveCard(card)));
+      } else {
+        await context.sendActivity(`✅ All activities are completed!`);
+      }
     }
   }
 
