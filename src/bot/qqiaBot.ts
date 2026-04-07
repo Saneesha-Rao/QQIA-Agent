@@ -563,33 +563,48 @@ export class QQIABot extends TeamsActivityHandler {
     const now = new Date();
     const cutoff = new Date(now.getTime() + days * 86400000);
 
-    // Filter to incomplete steps within the time window
-    let upcoming = mySteps.filter(s => {
-      if (s.corpStatus === 'Completed' || s.corpStatus === 'N/A') return false;
+    // Get all incomplete steps sorted by start/end date
+    const allPending = mySteps.filter(s => s.corpStatus !== 'Completed' && s.corpStatus !== 'N/A')
+      .sort((a, b) => {
+        const da = a.corpStartDate ? new Date(a.corpStartDate).getTime() : (a.corpEndDate ? new Date(a.corpEndDate).getTime() : Infinity);
+        const db = b.corpStartDate ? new Date(b.corpStartDate).getTime() : (b.corpEndDate ? new Date(b.corpEndDate).getTime() : Infinity);
+        return da - db;
+      });
+
+    // Filter to steps that START or END within the time window
+    const inWindow = allPending.filter(s => {
+      const startDate = s.corpStartDate ? new Date(s.corpStartDate) : null;
       const endDate = s.corpEndDate ? new Date(s.corpEndDate) : null;
-      return endDate && endDate <= cutoff;
-    }).sort((a, b) => {
-      const da = a.corpEndDate ? new Date(a.corpEndDate).getTime() : Infinity;
-      const db = b.corpEndDate ? new Date(b.corpEndDate).getTime() : Infinity;
-      return da - db;
+      return (startDate && startDate >= now && startDate <= cutoff) ||
+             (endDate && endDate >= now && endDate <= cutoff) ||
+             (startDate && endDate && startDate <= now && endDate >= now); // currently active
     });
 
-    // If nothing in the window, show all pending tasks
-    if (upcoming.length === 0) {
-      upcoming = mySteps.filter(s => s.corpStatus !== 'Completed' && s.corpStatus !== 'N/A')
-        .sort((a, b) => {
-          const da = a.corpEndDate ? new Date(a.corpEndDate).getTime() : Infinity;
-          const db = b.corpEndDate ? new Date(b.corpEndDate).getTime() : Infinity;
-          return da - db;
-        });
-    }
+    const label = days <= 7 ? 'This Week' : `Next ${days} Days`;
 
-    if (upcoming.length > 0) {
-      const label = days <= 7 ? 'This Week' : `Next ${days} Days`;
-      const card = buildMyTasksCard(`${userName} — ${label}`, upcoming);
+    if (inWindow.length > 0) {
+      const card = buildMyTasksCard(`${userName} — ${label}`, inWindow);
       await context.sendActivity(MessageFactory.attachment(CardFactory.adaptiveCard(card)));
     } else {
-      await context.sendActivity(`✅ All your activities are completed, **${userName}**! 🎉`);
+      // Nothing in window — show next 5 upcoming with a helpful message
+      const nextUp = allPending.filter(s => {
+        const startDate = s.corpStartDate ? new Date(s.corpStartDate) : null;
+        return startDate && startDate > now;
+      }).slice(0, 5);
+
+      if (nextUp.length > 0) {
+        const firstDate = nextUp[0].corpStartDate || 'TBD';
+        await context.sendActivity(
+          `📅 **${userName}** has no tasks starting or due ${label.toLowerCase()}.\n\n` +
+          `Their next tasks begin **${firstDate}**. Here are the next ${nextUp.length} upcoming:`
+        );
+        const card = buildMyTasksCard(`${userName} — Next Upcoming`, nextUp);
+        await context.sendActivity(MessageFactory.attachment(CardFactory.adaptiveCard(card)));
+      } else if (allPending.length > 0) {
+        await context.sendActivity(`**${userName}** has ${allPending.length} pending tasks but none with scheduled dates yet.`);
+      } else {
+        await context.sendActivity(`✅ All activities are completed for **${userName}**! 🎉`);
+      }
     }
   }
 
