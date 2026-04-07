@@ -436,6 +436,9 @@ export class QQIABot extends TeamsActivityHandler {
       return;
     }
 
+    // Detect personal pronouns — "I", "my", "me" → filter to user's tasks
+    const isPersonal = /\b(i |i'[a-z]|my |me |mine)\b/.test(text) || text.startsWith('do i ') || text.startsWith('what do i');
+
     // Detect time-window keywords and extract days
     const timeMatch = text.match(/(?:this|next)\s+(\d+\s+)?(week|month|sprint)|(?:next|coming|upcoming)\s+(\d+)\s+days?|(?:in the next|within)\s+(\d+)\s+days?/i);
     let lookAheadDays = 7;
@@ -445,8 +448,15 @@ export class QQIABot extends TeamsActivityHandler {
       else if (timeMatch[4]) lookAheadDays = parseInt(timeMatch[4]);
     }
 
-    // Upcoming / due / activities / need to be completed / pending / what's next
-    if (text.includes('upcoming') || text.includes('coming up') || text.includes('what\'s next') ||
+    // Personal + activity/task/upcoming query → show MY upcoming tasks
+    if (isPersonal && (text.includes('activities') || text.includes('task') || text.includes('upcoming') ||
+        text.includes('need to') || text.includes('start') || text.includes('do') ||
+        text.includes('due') || text.includes('pending') || text.includes('this week') ||
+        text.includes('next week') || text.includes('this month') || text.includes('assigned') ||
+        text.includes('own') || text.includes('working') || text.includes('responsible'))) {
+      await this.handleMyUpcoming(context, userName, lookAheadDays);
+    // Upcoming / due / activities (non-personal) → show all
+    } else if (text.includes('upcoming') || text.includes('coming up') || text.includes('what\'s next') ||
         text.includes('whats next') || text.includes('need to be completed') || text.includes('needs to be') ||
         text.includes('activities') || text.includes('pending') ||
         text.includes('scheduled') || text.includes('planned') || text.includes('remaining') ||
@@ -517,6 +527,51 @@ export class QQIABot extends TeamsActivityHandler {
       } else {
         await context.sendActivity(`✅ All activities are completed!`);
       }
+    }
+  }
+
+  /** Show upcoming activities for a specific user within N days */
+  private async handleMyUpcoming(context: TurnContext, userName: string, days: number = 7): Promise<void> {
+    const mySteps = await this.dataService.getStepsByOwner(userName);
+
+    if (mySteps.length === 0) {
+      await context.sendActivity(
+        `No steps found assigned to **${userName}**.\n\n` +
+        `Your Teams name must match the tracker. Try **tasks for [exact name]** or **my tasks**.`
+      );
+      return;
+    }
+
+    const now = new Date();
+    const cutoff = new Date(now.getTime() + days * 86400000);
+
+    // Filter to incomplete steps within the time window
+    let upcoming = mySteps.filter(s => {
+      if (s.corpStatus === 'Completed' || s.corpStatus === 'N/A') return false;
+      const endDate = s.corpEndDate ? new Date(s.corpEndDate) : null;
+      return endDate && endDate <= cutoff;
+    }).sort((a, b) => {
+      const da = a.corpEndDate ? new Date(a.corpEndDate).getTime() : Infinity;
+      const db = b.corpEndDate ? new Date(b.corpEndDate).getTime() : Infinity;
+      return da - db;
+    });
+
+    // If nothing in the window, show all pending tasks
+    if (upcoming.length === 0) {
+      upcoming = mySteps.filter(s => s.corpStatus !== 'Completed' && s.corpStatus !== 'N/A')
+        .sort((a, b) => {
+          const da = a.corpEndDate ? new Date(a.corpEndDate).getTime() : Infinity;
+          const db = b.corpEndDate ? new Date(b.corpEndDate).getTime() : Infinity;
+          return da - db;
+        });
+    }
+
+    if (upcoming.length > 0) {
+      const label = days <= 7 ? 'This Week' : `Next ${days} Days`;
+      const card = buildMyTasksCard(`${userName} — ${label}`, upcoming);
+      await context.sendActivity(MessageFactory.attachment(CardFactory.adaptiveCard(card)));
+    } else {
+      await context.sendActivity(`✅ All your activities are completed, **${userName}**! 🎉`);
     }
   }
 
