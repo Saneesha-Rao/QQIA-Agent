@@ -176,6 +176,8 @@
   <div class="header">
     <div>&#128202;</div>
     <h1>QQIA Agent &#8212; FY27 Mint Rollover</h1>
+    <button id="signInBtn" onclick="msalSignIn()" style="margin-left:auto;padding:5px 14px;border:1px solid rgba(255,255,255,0.5);border-radius:4px;background:transparent;color:white;cursor:pointer;font-size:13px">&#128274; Sign in to sync</button>
+    <span id="userDisplay" style="display:none;margin-left:auto;font-size:13px">&#9989; <span id="signedInUser"></span> <button onclick="msalSignOut()" style="background:none;border:none;color:rgba(255,255,255,0.7);cursor:pointer;font-size:11px;text-decoration:underline">(sign out)</button></span>
     <div class="status connected" id="statusIndicator">Connected</div>
   </div>
 
@@ -187,7 +189,8 @@
     <button class="quick-btn" onclick="send('upcoming')">&#128197; Upcoming</button>
     <button class="quick-btn" onclick="send('critical path')">&#128279; Critical Path</button>
     <button class="quick-btn" onclick="send('help')">&#10067; Help</button>
-    <button class="quick-btn" onclick="window.open('/api/download/excel','_blank')" style="margin-left:auto;color:var(--success);border-color:var(--success)">&#128229; Download Excel</button>
+    <button class="quick-btn" id="syncNowBtn" onclick="syncToOneDrive()" style="margin-left:auto;color:var(--success);border-color:var(--success);display:none">&#128259; Sync to OneDrive</button>
+    <button class="quick-btn" onclick="window.open('/api/download/excel','_blank')" style="color:var(--text-muted);border-color:var(--border)">&#128229; Download</button>
   </div>
 
   <div class="messages" id="messages">
@@ -204,15 +207,128 @@
     <button id="sendBtn" onclick="sendInput()">Send</button>
   </div>
 
+  <script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
   <script>
-    const messagesEl = document.getElementById('messages');
-    const inputEl = document.getElementById('input');
-    const sendBtn = document.getElementById('sendBtn');
-    const statusEl = document.getElementById('statusIndicator');
+    // ---- MSAL Configuration ----
+    var msalConfig = {
+      auth: {
+        clientId: '5767db68-85d0-4931-b519-661be7d201e0',
+        authority: 'https://login.microsoftonline.com/72f988bf-86f1-41af-91ab-2d7cd011db47',
+        redirectUri: window.location.origin
+      },
+      cache: { cacheLocation: 'localStorage', storeAuthStateInCookie: false }
+    };
+    var msalInstance = new msal.PublicClientApplication(msalConfig);
+    var graphScopes = ['Files.ReadWrite.All'];
+    var oneDrivePath = '/Seller Incentives/QQIA/FY27_Mint_RolloverTimeline.xlsx';
+    var pendingSyncCount = 0;
+
+    // Try to restore session on load
+    msalInstance.initialize().then(function() {
+      var accounts = msalInstance.getAllAccounts();
+      if (accounts.length > 0) {
+        msalInstance.setActiveAccount(accounts[0]);
+        showSignedIn(accounts[0]);
+      }
+    });
+
+    function msalSignIn() {
+      msalInstance.loginPopup({ scopes: graphScopes }).then(function(response) {
+        msalInstance.setActiveAccount(response.account);
+        showSignedIn(response.account);
+        if (window._userName === 'Teams User' || !window._userName) {
+          window._userName = response.account.name;
+          localStorage.setItem('qqia_username', response.account.name);
+        }
+      }).catch(function(err) {
+        console.error('Sign-in error:', err);
+        addMessage('Sign-in failed: ' + err.message, 'bot error');
+      });
+    }
+
+    function msalSignOut() {
+      msalInstance.logoutPopup().then(function() {
+        document.getElementById('signInBtn').style.display = '';
+        document.getElementById('userDisplay').style.display = 'none';
+        document.getElementById('syncNowBtn').style.display = 'none';
+      });
+    }
+
+    function showSignedIn(account) {
+      document.getElementById('signInBtn').style.display = 'none';
+      document.getElementById('userDisplay').style.display = '';
+      document.getElementById('signedInUser').textContent = account.name || account.username;
+      document.getElementById('syncNowBtn').style.display = '';
+    }
+
+    function getGraphToken() {
+      var account = msalInstance.getActiveAccount();
+      if (!account) return Promise.reject(new Error('Not signed in'));
+      return msalInstance.acquireTokenSilent({ scopes: graphScopes, account: account })
+        .catch(function() { return msalInstance.acquireTokenPopup({ scopes: graphScopes }); })
+        .then(function(response) { return response.accessToken; });
+    }
+
+    function syncToOneDrive() {
+      var syncBtn = document.getElementById('syncNowBtn');
+      syncBtn.textContent = '\u23F3 Syncing...';
+      syncBtn.disabled = true;
+
+      getGraphToken().then(function(token) {
+        // Download updated Excel from the bot
+        return fetch('/api/download/excel').then(function(res) {
+          if (!res.ok) throw new Error('Failed to download Excel from bot');
+          return res.blob();
+        }).then(function(blob) {
+          // Upload to OneDrive via Graph API
+          var uploadUrl = 'https://graph.microsoft.com/v1.0/me/drive/root:' + oneDrivePath + ':/content';
+          return fetch(uploadUrl, {
+            method: 'PUT',
+            headers: {
+              'Authorization': 'Bearer ' + token,
+              'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            },
+            body: blob
+          });
+        });
+      }).then(function(res) {
+        if (!res.ok) return res.json().then(function(e) { throw new Error(e.error ? e.error.message : 'Upload failed'); });
+        pendingSyncCount = 0;
+        updateSyncBadge();
+        syncBtn.textContent = '\u2705 Synced!';
+        syncBtn.disabled = false;
+        addMessage('\u2705 Excel synced to OneDrive successfully!', 'bot', true);
+        setTimeout(function() { syncBtn.textContent = '\uD83D\uDD03 Sync to OneDrive'; }, 3000);
+      }).catch(function(err) {
+        console.error('Sync error:', err);
+        syncBtn.textContent = '\uD83D\uDD03 Sync to OneDrive';
+        syncBtn.disabled = false;
+        addMessage('\u274C OneDrive sync failed: ' + err.message, 'bot error');
+      });
+    }
+
+    function updateSyncBadge() {
+      var btn = document.getElementById('syncNowBtn');
+      if (!btn || btn.style.display === 'none') return;
+      if (pendingSyncCount > 0) {
+        btn.textContent = '\uD83D\uDD03 Sync (' + pendingSyncCount + ' pending)';
+        btn.style.color = 'var(--warning)';
+        btn.style.borderColor = 'var(--warning)';
+      } else {
+        btn.textContent = '\uD83D\uDD03 Sync to OneDrive';
+        btn.style.color = 'var(--success)';
+        btn.style.borderColor = 'var(--success)';
+      }
+    }
+
+    // ---- Core UI Logic ----
+    var messagesEl = document.getElementById('messages');
+    var inputEl = document.getElementById('input');
+    var sendBtn = document.getElementById('sendBtn');
+    var statusEl = document.getElementById('statusIndicator');
 
     inputEl.addEventListener('keydown', function(e) { if (e.key === 'Enter' && !sendBtn.disabled) sendInput(); });
 
-    // Check health on load
     fetch('/api/health').then(function(r) { return r.json(); }).then(function(d) {
       statusEl.textContent = 'Connected \u00B7 ' + d.trackedSteps + ' steps';
       statusEl.className = 'status connected';
@@ -235,6 +351,7 @@
       sendBtn.disabled = true;
 
       var loadingEl = addMessage('Thinking...', 'bot loading');
+      var isUpdate = /^(update |mark |complete |fed update |fed mark )/.test(text.toLowerCase());
 
       fetch('/api/webhook', {
         method: 'POST',
@@ -249,6 +366,14 @@
         } else {
           addMessage('No response received.', 'bot error');
         }
+
+        // Auto-sync after status updates if signed in
+        if (isUpdate && data.text && data.text.indexOf('\u2705') !== -1 && msalInstance.getActiveAccount()) {
+          pendingSyncCount++;
+          updateSyncBadge();
+          syncToOneDrive();
+        }
+
         sendBtn.disabled = false;
         inputEl.focus();
       }).catch(function(err) {
@@ -261,7 +386,13 @@
 
     function getUserName() {
       if (!window._userName) {
-        window._userName = localStorage.getItem('qqia_username') || 'Teams User';
+        var account = msalInstance.getActiveAccount();
+        if (account) {
+          window._userName = account.name || account.username;
+          localStorage.setItem('qqia_username', window._userName);
+        } else {
+          window._userName = localStorage.getItem('qqia_username') || 'Teams User';
+        }
       }
       return window._userName;
     }
@@ -389,15 +520,15 @@
       });
     }
 
-    // Username setup on first visit
-    if (!localStorage.getItem('qqia_username')) {
+    // Username setup on first visit (skip if signed in via MSAL)
+    if (!localStorage.getItem('qqia_username') && !msalInstance.getActiveAccount()) {
       setTimeout(function() {
-        var name = prompt('Enter your name (as it appears in the rollover tracker):');
+        var name = prompt('Enter your name (as it appears in the rollover tracker), or click "Sign in" above:');
         if (name) {
           localStorage.setItem('qqia_username', name);
           window._userName = name;
         }
-      }, 500);
+      }, 1000);
     }
   </script>
 </body>
