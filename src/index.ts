@@ -75,6 +75,15 @@ const webhookHandler = new WebhookHandler(
 const server = restify.createServer();
 server.use(restify.plugins.bodyParser());
 
+// CORS preflight for Office Script support
+server.opts('/api/steps/json', (req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.send(204);
+  return next();
+});
+
 // Serve the web UI at root
 const publicDir = path.join(__dirname, '..', 'public');
 server.get('/', (req, res, next) => {
@@ -126,6 +135,33 @@ server.get('/api/download/excel', (req, res, next) => {
   });
   fs.createReadStream(excelPath).pipe(res);
   return next(false);
+});
+
+// JSON API for Office Script sync - returns all steps with status data
+server.get('/api/steps/json', async (req, res, next) => {
+  try {
+    const steps = await dataService.getAllSteps();
+    // Add CORS headers so Office Scripts can call this endpoint
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.send(200, {
+      timestamp: new Date().toISOString(),
+      stepCount: steps.length,
+      steps: steps.map(s => ({
+        stepId: s.id,
+        status: s.corpStatus,
+        fedStatus: s.fedStatus,
+        completedDate: s.corpCompletedDate || null,
+        lastModifiedBy: s.lastModifiedBy || null,
+        lastModifiedDate: s.lastModified || null,
+        description: s.description || null,
+      })),
+    });
+  } catch (err) {
+    res.send(500, { error: 'Failed to retrieve steps' });
+  }
+  return next();
 });
 
 // Health check endpoint with status details

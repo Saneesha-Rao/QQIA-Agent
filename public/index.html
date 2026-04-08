@@ -176,8 +176,7 @@
   <div class="header">
     <div>&#128202;</div>
     <h1>QQIA Agent &#8212; FY27 Mint Rollover</h1>
-    <button id="signInBtn" onclick="msalSignIn()" style="margin-left:auto;padding:5px 14px;border:1px solid rgba(255,255,255,0.5);border-radius:4px;background:transparent;color:white;cursor:pointer;font-size:13px">&#128274; Sign in to sync</button>
-    <span id="userDisplay" style="display:none;margin-left:auto;font-size:13px">&#9989; <span id="signedInUser"></span> <button onclick="msalSignOut()" style="background:none;border:none;color:rgba(255,255,255,0.7);cursor:pointer;font-size:11px;text-decoration:underline">(sign out)</button></span>
+    <button id="signInBtn" onclick="showSyncInstructions()" style="margin-left:auto;padding:5px 14px;border:1px solid rgba(255,255,255,0.5);border-radius:4px;background:transparent;color:white;cursor:pointer;font-size:13px">&#128260; Setup Sync</button>
     <div class="status connected" id="statusIndicator">Connected</div>
   </div>
 
@@ -189,7 +188,7 @@
     <button class="quick-btn" onclick="send('upcoming')">&#128197; Upcoming</button>
     <button class="quick-btn" onclick="send('critical path')">&#128279; Critical Path</button>
     <button class="quick-btn" onclick="send('help')">&#10067; Help</button>
-    <button class="quick-btn" id="syncNowBtn" onclick="syncToOneDrive()" style="margin-left:auto;color:var(--success);border-color:var(--success);display:none">&#128259; Sync to OneDrive</button>
+    <button class="quick-btn" id="syncNowBtn" onclick="triggerOfficeScriptSync()" style="margin-left:auto;color:var(--success);border-color:var(--success)">&#128260; Sync to Excel</button>
     <button class="quick-btn" onclick="window.open('/api/download/excel','_blank')" style="color:var(--text-muted);border-color:var(--border)">&#128229; Download</button>
   </div>
 
@@ -207,154 +206,71 @@
     <button id="sendBtn" onclick="sendInput()">Send</button>
   </div>
 
-  <script src="/msal-browser.min.js"></script></script>
   <script>
-    // ---- MSAL Configuration ----
-    var msalConfig = {
-      auth: {
-        clientId: '5767db68-85d0-4931-b519-661be7d201e0',
-        authority: 'https://login.microsoftonline.com/72f988bf-86f1-41af-91ab-2d7cd011db47',
-        redirectUri: window.location.origin
-      },
-      cache: { cacheLocation: 'localStorage', storeAuthStateInCookie: false }
-    };
-    var msalInstance = null;
-    var msalReady = false;
-    var loginScopes = ['User.Read', 'Files.ReadWrite'];
-    var graphScopes = ['Files.ReadWrite'];
-    var oneDrivePath = '/Seller Incentives/QQIA/FY27_Mint_RolloverTimeline.xlsx';
+    // ---- Sync Configuration ----
+    var botApiUrl = window.location.origin + '/api/steps/json';
     var pendingSyncCount = 0;
 
-    // Initialize MSAL (required before any auth calls)
-    (function initMsal() {
-      try {
-        var pca = new msal.PublicClientApplication(msalConfig);
-        pca.initialize().then(function() {
-          msalInstance = pca;
-          // Handle redirect response (if returning from consent redirect)
-          return msalInstance.handleRedirectPromise();
-        }).then(function(response) {
-          msalReady = true;
-          console.log('MSAL initialized');
-          if (response && response.account) {
-            msalInstance.setActiveAccount(response.account);
-            showSignedIn(response.account);
-          } else {
-            var accounts = msalInstance.getAllAccounts();
-            if (accounts.length > 0) {
-              msalInstance.setActiveAccount(accounts[0]);
-              showSignedIn(accounts[0]);
-            }
-          }
-        }).catch(function(err) {
-          console.error('MSAL init error:', err);
-        });
-      } catch(e) {
-        console.error('MSAL creation error:', e);
-      }
-    })();
-
-    function msalSignIn() {
-      if (!msalReady || !msalInstance) {
-        addMessage('Authentication is still loading. Please wait a moment and try again.', 'bot error');
-        return;
-      }
-      msalInstance.loginPopup({ scopes: loginScopes }).then(function(response) {
-        msalInstance.setActiveAccount(response.account);
-        showSignedIn(response.account);
-        if (window._userName === 'Teams User' || !window._userName) {
-          window._userName = response.account.name;
-          localStorage.setItem('qqia_username', response.account.name);
-        }
-      }).catch(function(err) {
-        console.error('Sign-in error:', err);
-        if (err.errorCode === 'consent_required' || (err.message && err.message.indexOf('admin') !== -1)) {
-          addMessage('⚠️ Admin consent may be required. Ask your IT admin to approve the app, or try signing in again.', 'bot error');
-        } else {
-          addMessage('Sign-in failed: ' + err.message, 'bot error');
-        }
-      });
-    }
-
-    function msalSignOut() {
-      if (!msalInstance) return;
-      msalInstance.logoutPopup().then(function() {
-        document.getElementById('signInBtn').style.display = '';
-        document.getElementById('userDisplay').style.display = 'none';
-        document.getElementById('syncNowBtn').style.display = 'none';
-      });
-    }
-
-    function showSignedIn(account) {
-      document.getElementById('signInBtn').style.display = 'none';
-      document.getElementById('userDisplay').style.display = '';
-      document.getElementById('signedInUser').textContent = account.name || account.username;
-      document.getElementById('syncNowBtn').style.display = '';
-    }
-
-    function getGraphToken() {
-      if (!msalInstance) return Promise.reject(new Error('MSAL not initialized'));
-      var account = msalInstance.getActiveAccount();
-      if (!account) return Promise.reject(new Error('Not signed in'));
-      return msalInstance.acquireTokenSilent({ scopes: graphScopes, account: account })
-        .catch(function(err) {
-          console.warn('Silent token failed, trying redirect:', err);
-          msalInstance.acquireTokenRedirect({ scopes: graphScopes });
-          return Promise.reject(new Error('Redirecting for consent...'));
-        })
-        .then(function(response) { return response.accessToken; });
-    }
-
-    function syncToOneDrive() {
+    function triggerOfficeScriptSync() {
       var syncBtn = document.getElementById('syncNowBtn');
-      syncBtn.textContent = '\u23F3 Syncing...';
+      syncBtn.textContent = '\u23F3 Fetching data...';
       syncBtn.disabled = true;
 
-      getGraphToken().then(function(token) {
-        // Download updated Excel from the bot
-        return fetch('/api/download/excel').then(function(res) {
-          if (!res.ok) throw new Error('Failed to download Excel from bot');
-          return res.blob();
-        }).then(function(blob) {
-          // Upload to OneDrive via Graph API
-          var uploadUrl = 'https://graph.microsoft.com/v1.0/me/drive/root:' + oneDrivePath + ':/content';
-          return fetch(uploadUrl, {
-            method: 'PUT',
-            headers: {
-              'Authorization': 'Bearer ' + token,
-              'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-            },
-            body: blob
-          });
+      fetch('/api/steps/json').then(function(res) { return res.json(); }).then(function(data) {
+        // Copy the API URL to clipboard for the Office Script
+        navigator.clipboard.writeText(botApiUrl).then(function() {
+          addMessage('📋 **API URL copied to clipboard!**\n\nTo sync your OneDrive Excel:\n1. Open your Excel file in **Excel Online** (OneDrive)\n2. Click **Automate** tab → **New Script**\n3. Paste the Office Script from the Setup Sync instructions\n4. Click **Run**\n\n' +
+            '📊 Current data: **' + data.stepCount + ' steps** | Last update: ' + new Date(data.timestamp).toLocaleString() +
+            '\n\n✅ ' + data.steps.filter(function(s) { return s.status === 'Completed'; }).length + ' completed | ' +
+            '⏳ ' + data.steps.filter(function(s) { return s.status === 'In Progress'; }).length + ' in progress | ' +
+            '⚠️ ' + data.steps.filter(function(s) { return s.status === 'Overdue'; }).length + ' overdue', 'bot', true);
+        }).catch(function() {
+          addMessage('📊 API URL: `' + botApiUrl + '`\n\nCopy this URL and use it in the Office Script.', 'bot', true);
         });
-      }).then(function(res) {
-        if (!res.ok) return res.json().then(function(e) { throw new Error(e.error ? e.error.message : 'Upload failed'); });
         pendingSyncCount = 0;
         updateSyncBadge();
-        syncBtn.textContent = '\u2705 Synced!';
+        syncBtn.textContent = '🔄 Sync to Excel';
         syncBtn.disabled = false;
-        addMessage('\u2705 Excel synced to OneDrive successfully!', 'bot', true);
-        setTimeout(function() { syncBtn.textContent = '\uD83D\uDD03 Sync to OneDrive'; }, 3000);
       }).catch(function(err) {
-        console.error('Sync error:', err);
-        syncBtn.textContent = '\uD83D\uDD03 Sync to OneDrive';
+        syncBtn.textContent = '🔄 Sync to Excel';
         syncBtn.disabled = false;
-        addMessage('\u274C OneDrive sync failed: ' + err.message, 'bot error');
+        addMessage('❌ Failed to fetch data: ' + err.message, 'bot error');
       });
     }
 
-    function updateSyncBadge() {
-      var btn = document.getElementById('syncNowBtn');
-      if (!btn || btn.style.display === 'none') return;
-      if (pendingSyncCount > 0) {
-        btn.textContent = '\uD83D\uDD03 Sync (' + pendingSyncCount + ' pending)';
-        btn.style.color = 'var(--warning)';
-        btn.style.borderColor = 'var(--warning)';
-      } else {
-        btn.textContent = '\uD83D\uDD03 Sync to OneDrive';
-        btn.style.color = 'var(--success)';
-        btn.style.borderColor = 'var(--success)';
-      }
+    function showSyncInstructions() {
+      var scriptCode = 'async function main(workbook: ExcelScript.Workbook) {\\n' +
+        '  const response = await fetch("' + botApiUrl + '");\\n' +
+        '  const data = await response.json();\\n' +
+        '  const sheet = workbook.getActiveWorksheet();\\n' +
+        '  // Find the Status column (adjust column letter as needed)\\n' +
+        '  for (const step of data.steps) {\\n' +
+        '    const used = sheet.getUsedRange();\\n' +
+        '    const values = used.getValues();\\n' +
+        '    for (let r = 0; r < values.length; r++) {\\n' +
+        '      if (String(values[r][0]).trim() === step.stepId) {\\n' +
+        '        // Update Status column (adjust index for your layout)\\n' +
+        '        const statusCol = 5; // Column F (0-indexed)\\n' +
+        '        sheet.getCell(r, statusCol).setValue(step.status);\\n' +
+        '        if (step.completedDate) {\\n' +
+        '          sheet.getCell(r, statusCol + 1).setValue(step.completedDate);\\n' +
+        '        }\\n' +
+        '        break;\\n' +
+        '      }\\n' +
+        '    }\\n' +
+        '  }\\n' +
+        '}';
+
+      addMessage('## 🔄 Office Script Sync Setup\n\n' +
+        'Since corporate policy blocks direct OneDrive API access, use an **Office Script** to pull updates into your Excel:\n\n' +
+        '### One-time setup:\n' +
+        '1. Open your Excel file on **OneDrive** (Excel Online)\n' +
+        '2. Click **Automate** tab → **New Script**\n' +
+        '3. Paste the script below and save it\n' +
+        '4. Click **Run** anytime you want to sync\n\n' +
+        '### API endpoint:\n`' + botApiUrl + '`\n\n' +
+        '### Quick alternative:\nClick **🔄 Sync to Excel** → then **📥 Download** to get the latest file.\n\n' +
+        '💡 *Tip: After each status update in this chat, click Download to get the updated file.*', 'bot', true);
     }
 
     // ---- Core UI Logic ----
@@ -403,11 +319,10 @@
           addMessage('No response received.', 'bot error');
         }
 
-        // Auto-sync after status updates if signed in
-        if (isUpdate && data.text && data.text.indexOf('\u2705') !== -1 && msalInstance && msalInstance.getActiveAccount()) {
+        // Track pending changes for sync notification
+        if (isUpdate && data.text && data.text.indexOf('\u2705') !== -1) {
           pendingSyncCount++;
           updateSyncBadge();
-          syncToOneDrive();
         }
 
         sendBtn.disabled = false;
@@ -422,15 +337,23 @@
 
     function getUserName() {
       if (!window._userName) {
-        var account = msalInstance ? msalInstance.getActiveAccount() : null;
-        if (account) {
-          window._userName = account.name || account.username;
-          localStorage.setItem('qqia_username', window._userName);
-        } else {
-          window._userName = localStorage.getItem('qqia_username') || 'Teams User';
-        }
+        window._userName = localStorage.getItem('qqia_username') || 'Teams User';
       }
       return window._userName;
+    }
+
+    function updateSyncBadge() {
+      var btn = document.getElementById('syncNowBtn');
+      if (!btn) return;
+      if (pendingSyncCount > 0) {
+        btn.textContent = '\uD83D\uDD04 Sync (' + pendingSyncCount + ' pending)';
+        btn.style.color = 'var(--warning)';
+        btn.style.borderColor = 'var(--warning)';
+      } else {
+        btn.textContent = '\uD83D\uDD04 Sync to Excel';
+        btn.style.color = 'var(--success)';
+        btn.style.borderColor = 'var(--success)';
+      }
     }
 
     function addMessage(text, classes, isMarkdown) {
@@ -557,9 +480,9 @@
     }
 
     // Username setup on first visit (skip if signed in via MSAL)
-    if (!localStorage.getItem('qqia_username') && !(msalInstance && msalInstance.getActiveAccount())) {
+    if (!localStorage.getItem('qqia_username')) {
       setTimeout(function() {
-        var name = prompt('Enter your name (as it appears in the rollover tracker), or click "Sign in" above:');
+        var name = prompt('Enter your name (as it appears in the rollover tracker):');
         if (name) {
           localStorage.setItem('qqia_username', name);
           window._userName = name;
