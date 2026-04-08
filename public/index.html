@@ -239,38 +239,28 @@
     }
 
     function showSyncInstructions() {
-      var scriptCode = 'async function main(workbook: ExcelScript.Workbook) {\\n' +
-        '  const response = await fetch("' + botApiUrl + '");\\n' +
-        '  const data = await response.json();\\n' +
-        '  const sheet = workbook.getActiveWorksheet();\\n' +
-        '  // Find the Status column (adjust column letter as needed)\\n' +
-        '  for (const step of data.steps) {\\n' +
-        '    const used = sheet.getUsedRange();\\n' +
-        '    const values = used.getValues();\\n' +
-        '    for (let r = 0; r < values.length; r++) {\\n' +
-        '      if (String(values[r][0]).trim() === step.stepId) {\\n' +
-        '        // Update Status column (adjust index for your layout)\\n' +
-        '        const statusCol = 5; // Column F (0-indexed)\\n' +
-        '        sheet.getCell(r, statusCol).setValue(step.status);\\n' +
-        '        if (step.completedDate) {\\n' +
-        '          sheet.getCell(r, statusCol + 1).setValue(step.completedDate);\\n' +
-        '        }\\n' +
-        '        break;\\n' +
-        '      }\\n' +
-        '    }\\n' +
-        '  }\\n' +
-        '}';
+      // Fetch the actual Office Script content
+      fetch('/SyncFromBot.osts').then(function(r) { return r.text(); }).then(function(scriptCode) {
+        addMessage('## 🔄 Office Script Sync Setup\n\n' +
+          '### Steps:\n' +
+          '1. Open your Excel file on **OneDrive** → click **Edit in Excel Online**\n' +
+          '2. Click the **Automate** tab → **New Script**\n' +
+          '3. Delete any default code, then paste the script below\n' +
+          '4. Click **Run** to sync!\n\n' +
+          '### API endpoint:\n`' + botApiUrl + '`\n\n' +
+          '💡 Run the script anytime to pull the latest status updates into your Excel.', 'bot', true);
 
-      addMessage('## 🔄 Office Script Sync Setup\n\n' +
-        'Since corporate policy blocks direct OneDrive API access, use an **Office Script** to pull updates into your Excel:\n\n' +
-        '### One-time setup:\n' +
-        '1. Open your Excel file on **OneDrive** (Excel Online)\n' +
-        '2. Click **Automate** tab → **New Script**\n' +
-        '3. Paste the script below and save it\n' +
-        '4. Click **Run** anytime you want to sync\n\n' +
-        '### API endpoint:\n`' + botApiUrl + '`\n\n' +
-        '### Quick alternative:\nClick **🔄 Sync to Excel** → then **📥 Download** to get the latest file.\n\n' +
-        '💡 *Tip: After each status update in this chat, click Download to get the updated file.*', 'bot', true);
+        // Add a copy button + code block
+        var codeDiv = document.createElement('div');
+        codeDiv.className = 'message bot';
+        codeDiv.innerHTML = '<div style="position:relative"><button onclick="navigator.clipboard.writeText(this.nextElementSibling.textContent).then(function(){alert(\'Script copied to clipboard!\')})" style="position:absolute;top:4px;right:4px;padding:4px 10px;font-size:12px;background:var(--primary);color:white;border:none;border-radius:4px;cursor:pointer">📋 Copy Script</button><pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:12px;line-height:1.5;max-height:300px;overflow-y:auto">' +
+          scriptCode.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') +
+          '</pre></div>';
+        messagesEl.appendChild(codeDiv);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+      }).catch(function() {
+        addMessage('❌ Could not load the Office Script. Try opening: ' + window.location.origin + '/SyncFromBot.osts', 'bot error');
+      });
     }
 
     // ---- Core UI Logic ----

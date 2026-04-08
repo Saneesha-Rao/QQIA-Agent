@@ -1,0 +1,70 @@
+async function main(workbook: ExcelScript.Workbook) {
+  // QQIA Agent Sync Script
+  // Pulls latest status data from the bot and updates this Excel file
+  
+  // ⚠️ UPDATE THIS URL if your Codespace changes
+  const botUrl = "https://obscure-rotary-phone-q76rvrw7g6qpcxq4v-3978.app.github.dev/api/steps/json";
+  
+  // Fetch latest data from the bot
+  const response = await fetch(botUrl);
+  if (!response.ok) {
+    console.log("Failed to fetch data from bot. Is it running?");
+    return;
+  }
+  const data: BotData = await response.json();
+  console.log(`Fetched ${data.stepCount} steps from bot (${data.timestamp})`);
+  
+  // Get the first worksheet (FY27_Rollover)
+  const sheet = workbook.getWorksheets()[0];
+  const usedRange = sheet.getUsedRange();
+  const values = usedRange.getValues();
+  
+  let updated = 0;
+  
+  // Column indices (0-based): 
+  // 0=Step ID, 5=Corp Status, 6=Corp Completed Date, 9=Fed Status
+  const CORP_STATUS_COL = 5;
+  const CORP_COMPLETED_COL = 6;
+  const FED_STATUS_COL = 9;
+  
+  for (const step of data.steps) {
+    // Find the row with matching Step ID
+    for (let r = 1; r < values.length; r++) {
+      const cellId = String(values[r][0]).trim();
+      if (cellId === step.stepId) {
+        // Update Corp Status
+        if (step.status) {
+          sheet.getCell(r, CORP_STATUS_COL).setValue(step.status);
+        }
+        // Update Corp Completed Date
+        if (step.completedDate) {
+          sheet.getCell(r, CORP_COMPLETED_COL).setValue(step.completedDate);
+        }
+        // Update Fed Status
+        if (step.fedStatus) {
+          sheet.getCell(r, FED_STATUS_COL).setValue(step.fedStatus);
+        }
+        updated++;
+        break;
+      }
+    }
+  }
+  
+  console.log(`✅ Updated ${updated} steps in Excel`);
+}
+
+interface BotStep {
+  stepId: string;
+  status: string;
+  fedStatus: string;
+  completedDate: string | null;
+  lastModifiedBy: string | null;
+  lastModifiedDate: string | null;
+  description: string | null;
+}
+
+interface BotData {
+  timestamp: string;
+  stepCount: number;
+  steps: BotStep[];
+}

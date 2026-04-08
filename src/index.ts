@@ -100,12 +100,22 @@ server.get('/', (req, res, next) => {
   });
 });
 
-// Serve static files from public/ (MSAL bundle, etc.)
+// Serve static files from public/
 server.get('/msal-browser.min.js', (req, res, next) => {
   const filePath = path.join(publicDir, 'msal-browser.min.js');
   fs.readFile(filePath, (err, data) => {
     if (err) { res.writeHead(404); res.end(); }
     else { res.writeHead(200, { 'Content-Type': 'application/javascript' }); res.end(data); }
+    next(false);
+  });
+});
+
+// Serve the Office Script file
+server.get('/SyncFromBot.osts', (req, res, next) => {
+  const filePath = path.join(publicDir, 'SyncFromBot.osts');
+  fs.readFile(filePath, 'utf8', (err, data) => {
+    if (err) { res.writeHead(404); res.end(); }
+    else { res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end(data); }
     next(false);
   });
 });
