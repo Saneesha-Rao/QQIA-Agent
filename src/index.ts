@@ -91,6 +91,22 @@ server.get('/', (req, res, next) => {
   });
 });
 
+// Serve static files from public/ (MSAL bundle, etc.)
+const mimeTypes: Record<string, string> = { '.js': 'application/javascript', '.css': 'text/css', '.png': 'image/png', '.ico': 'image/x-icon' };
+server.get('/(.+\\.(js|css|png|ico))', (req, res, next) => {
+  const filePath = path.join(publicDir, req.params[0]);
+  const ext = path.extname(filePath);
+  fs.readFile(filePath, (err, data) => {
+    if (err) {
+      res.writeHead(404); res.end();
+    } else {
+      res.writeHead(200, { 'Content-Type': mimeTypes[ext] || 'application/octet-stream' });
+      res.end(data);
+    }
+    next(false);
+  });
+});
+
 server.post('/api/messages', async (req, res) => {
   await adapter.process(req, res, async (context) => {
     // Save conversation reference for proactive messaging on every interaction
