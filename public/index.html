@@ -220,7 +220,7 @@
     };
     var msalInstance = null;
     var msalReady = false;
-    var loginScopes = ['User.Read'];
+    var loginScopes = ['User.Read', 'Files.ReadWrite'];
     var graphScopes = ['Files.ReadWrite'];
     var oneDrivePath = '/Seller Incentives/QQIA/FY27_Mint_RolloverTimeline.xlsx';
     var pendingSyncCount = 0;
@@ -231,12 +231,20 @@
         var pca = new msal.PublicClientApplication(msalConfig);
         pca.initialize().then(function() {
           msalInstance = pca;
+          // Handle redirect response (if returning from consent redirect)
+          return msalInstance.handleRedirectPromise();
+        }).then(function(response) {
           msalReady = true;
           console.log('MSAL initialized');
-          var accounts = msalInstance.getAllAccounts();
-          if (accounts.length > 0) {
-            msalInstance.setActiveAccount(accounts[0]);
-            showSignedIn(accounts[0]);
+          if (response && response.account) {
+            msalInstance.setActiveAccount(response.account);
+            showSignedIn(response.account);
+          } else {
+            var accounts = msalInstance.getAllAccounts();
+            if (accounts.length > 0) {
+              msalInstance.setActiveAccount(accounts[0]);
+              showSignedIn(accounts[0]);
+            }
           }
         }).catch(function(err) {
           console.error('MSAL init error:', err);
@@ -289,7 +297,11 @@
       var account = msalInstance.getActiveAccount();
       if (!account) return Promise.reject(new Error('Not signed in'));
       return msalInstance.acquireTokenSilent({ scopes: graphScopes, account: account })
-        .catch(function() { return msalInstance.acquireTokenPopup({ scopes: graphScopes }); })
+        .catch(function(err) {
+          console.warn('Silent token failed, trying redirect:', err);
+          msalInstance.acquireTokenRedirect({ scopes: graphScopes });
+          return Promise.reject(new Error('Redirecting for consent...'));
+        })
         .then(function(response) { return response.accessToken; });
     }
 
