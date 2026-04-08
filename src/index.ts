@@ -111,10 +111,10 @@ server.get('/msal-browser.min.js', (req, res, next) => {
 });
 
 // Serve the Office Script file
-server.get('/SyncFromBot.osts', (req, res, next) => {
+server.get('/api/sync-script', (req, res, next) => {
   const filePath = path.join(publicDir, 'SyncFromBot.osts');
   fs.readFile(filePath, 'utf8', (err, data) => {
-    if (err) { res.writeHead(404); res.end(); }
+    if (err) { res.writeHead(404); res.end('Script not found'); }
     else { res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end(data); }
     next(false);
   });

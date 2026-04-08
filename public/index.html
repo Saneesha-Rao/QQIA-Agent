@@ -252,7 +252,7 @@
 
     function showSyncInstructions() {
       // Fetch the actual Office Script content
-      fetch('/SyncFromBot.osts').then(function(r) { return r.text(); }).then(function(scriptCode) {
+      fetch('/api/sync-script').then(function(r) { return r.text(); }).then(function(scriptCode) {
         addMessage('## 🔄 Office Script Sync Setup\n\n' +
           '### Steps:\n' +
           '1. Open your Excel file on **OneDrive** → click **Edit in Excel Online**\n' +
