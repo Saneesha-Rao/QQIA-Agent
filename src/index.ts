@@ -138,9 +138,8 @@ server.get('/api/download/excel', (req, res, next) => {
 });
 
 // JSON API for Office Script sync - returns all steps with status data
-server.get('/api/steps/json', async (req, res, next) => {
-  try {
-    const steps = await dataService.getAllSteps();
+server.get('/api/steps/json', (req, res, next) => {
+  dataService.getAllSteps().then(steps => {
     // Add CORS headers so Office Scripts can call this endpoint
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -158,10 +157,11 @@ server.get('/api/steps/json', async (req, res, next) => {
         description: s.description || null,
       })),
     });
-  } catch (err) {
+    return next();
+  }).catch(() => {
     res.send(500, { error: 'Failed to retrieve steps' });
-  }
-  return next();
+    return next();
+  });
 });
 
 // Health check endpoint with status details
