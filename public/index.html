@@ -207,7 +207,7 @@
     <button id="sendBtn" onclick="sendInput()">Send</button>
   </div>
 
-  <script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
+  <script src="https://alcdn.msauth.net/browser/3.10.0/js/msal-browser.min.js"></script>
   <script>
     // ---- MSAL Configuration ----
     var msalConfig = {
@@ -218,21 +218,38 @@
       },
       cache: { cacheLocation: 'localStorage', storeAuthStateInCookie: false }
     };
-    var msalInstance = new msal.PublicClientApplication(msalConfig);
+    var msalInstance = null;
+    var msalReady = false;
     var graphScopes = ['Files.ReadWrite.All'];
     var oneDrivePath = '/Seller Incentives/QQIA/FY27_Mint_RolloverTimeline.xlsx';
     var pendingSyncCount = 0;
 
-    // Try to restore session on load
-    msalInstance.initialize().then(function() {
-      var accounts = msalInstance.getAllAccounts();
-      if (accounts.length > 0) {
-        msalInstance.setActiveAccount(accounts[0]);
-        showSignedIn(accounts[0]);
+    // Initialize MSAL (required before any auth calls)
+    (function initMsal() {
+      try {
+        var pca = new msal.PublicClientApplication(msalConfig);
+        pca.initialize().then(function() {
+          msalInstance = pca;
+          msalReady = true;
+          console.log('MSAL initialized');
+          var accounts = msalInstance.getAllAccounts();
+          if (accounts.length > 0) {
+            msalInstance.setActiveAccount(accounts[0]);
+            showSignedIn(accounts[0]);
+          }
+        }).catch(function(err) {
+          console.error('MSAL init error:', err);
+        });
+      } catch(e) {
+        console.error('MSAL creation error:', e);
       }
-    });
+    })();
 
     function msalSignIn() {
+      if (!msalReady || !msalInstance) {
+        addMessage('Authentication is still loading. Please wait a moment and try again.', 'bot error');
+        return;
+      }
       msalInstance.loginPopup({ scopes: graphScopes }).then(function(response) {
         msalInstance.setActiveAccount(response.account);
         showSignedIn(response.account);
@@ -247,6 +264,7 @@
     }
 
     function msalSignOut() {
+      if (!msalInstance) return;
       msalInstance.logoutPopup().then(function() {
         document.getElementById('signInBtn').style.display = '';
         document.getElementById('userDisplay').style.display = 'none';
@@ -262,6 +280,7 @@
     }
 
     function getGraphToken() {
+      if (!msalInstance) return Promise.reject(new Error('MSAL not initialized'));
       var account = msalInstance.getActiveAccount();
       if (!account) return Promise.reject(new Error('Not signed in'));
       return msalInstance.acquireTokenSilent({ scopes: graphScopes, account: account })
@@ -368,7 +387,7 @@
         }
 
         // Auto-sync after status updates if signed in
-        if (isUpdate && data.text && data.text.indexOf('\u2705') !== -1 && msalInstance.getActiveAccount()) {
+        if (isUpdate && data.text && data.text.indexOf('\u2705') !== -1 && msalInstance && msalInstance.getActiveAccount()) {
           pendingSyncCount++;
           updateSyncBadge();
           syncToOneDrive();
@@ -386,7 +405,7 @@
 
     function getUserName() {
       if (!window._userName) {
-        var account = msalInstance.getActiveAccount();
+        var account = msalInstance ? msalInstance.getActiveAccount() : null;
         if (account) {
           window._userName = account.name || account.username;
           localStorage.setItem('qqia_username', window._userName);
@@ -521,7 +540,7 @@
     }
 
     // Username setup on first visit (skip if signed in via MSAL)
-    if (!localStorage.getItem('qqia_username') && !msalInstance.getActiveAccount()) {
+    if (!localStorage.getItem('qqia_username') && !(msalInstance && msalInstance.getActiveAccount())) {
       setTimeout(function() {
         var name = prompt('Enter your name (as it appears in the rollover tracker), or click "Sign in" above:');
         if (name) {
