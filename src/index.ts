@@ -19,6 +19,8 @@ import { SyncEngine } from './services/syncEngine';
 import { ProactiveMessenger } from './services/proactiveMessenger';
 import { WebhookHandler } from './webhookHandler';
 import * as XLSX from 'xlsx';
+import * as path from 'path';
+import * as fs from 'fs';
 
 dotenv.config();
 
@@ -72,6 +74,22 @@ const webhookHandler = new WebhookHandler(
 // ---- HTTP Server ----
 const server = restify.createServer();
 server.use(restify.plugins.bodyParser());
+
+// Serve the web UI at root
+const publicDir = path.join(__dirname, '..', 'public');
+server.get('/', (req, res, next) => {
+  const indexPath = path.join(publicDir, 'index.html');
+  fs.readFile(indexPath, 'utf8', (err, data) => {
+    if (err) {
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('Web UI not found');
+    } else {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(data);
+    }
+    next(false);
+  });
+});
 
 server.post('/api/messages', async (req, res) => {
   await adapter.process(req, res, async (context) => {

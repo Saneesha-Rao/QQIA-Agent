@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QQIA Agent — FY27 Mint Rollover</title>
+  <style>
+    :root {
+      --primary: #6264a7;
+      --primary-dark: #4b4d8a;
+      --bg: #f5f5f5;
+      --card-bg: #ffffff;
+      --text: #252423;
+      --text-muted: #605e5c;
+      --border: #e1dfdd;
+      --success: #13a10e;
+      --warning: #f7630c;
+      --danger: #d13438;
+      --info: #0078d4;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Header */
+    .header {
+      background: var(--primary);
+      color: white;
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .header h1 { font-size: 18px; font-weight: 600; }
+    .header .status { font-size: 12px; opacity: 0.8; margin-left: auto; }
+    .header .status.connected::before { content: '\25CF'; color: #92c353; margin-right: 4px; }
+    .header .status.disconnected::before { content: '\25CF'; color: var(--danger); margin-right: 4px; }
+
+    /* Quick actions */
+    .quick-actions {
+      display: flex;
+      gap: 8px;
+      padding: 12px 20px;
+      background: var(--card-bg);
+      border-bottom: 1px solid var(--border);
+      flex-wrap: wrap;
+    }
+    .quick-btn {
+      padding: 6px 14px;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      background: white;
+      cursor: pointer;
+      font-size: 13px;
+      color: var(--primary);
+      transition: all 0.15s;
+    }
+    .quick-btn:hover { background: var(--primary); color: white; border-color: var(--primary); }
+
+    /* Messages area */
+    .messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .message {
+      max-width: 90%;
+      padding: 12px 16px;
+      border-radius: 8px;
+      line-height: 1.5;
+      font-size: 14px;
+      animation: fadeIn 0.2s ease;
+    }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+    .message.user {
+      align-self: flex-end;
+      background: var(--primary);
+      color: white;
+      border-bottom-right-radius: 2px;
+    }
+    .message.bot {
+      align-self: flex-start;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-bottom-left-radius: 2px;
+    }
+    .message.bot .markdown h2 { font-size: 16px; margin: 0 0 8px; color: var(--primary); }
+    .message.bot .markdown h3 { font-size: 14px; margin: 12px 0 4px; color: var(--text); }
+    .message.bot .markdown ul { padding-left: 20px; }
+    .message.bot .markdown li { margin: 2px 0; }
+    .message.bot .markdown strong { color: var(--primary-dark); }
+    .message.bot .markdown p { margin: 4px 0; }
+    .message.error { background: #fde7e9; border-color: var(--danger); color: var(--danger); }
+    .message.loading { color: var(--text-muted); font-style: italic; }
+
+    /* Adaptive Card rendering */
+    .adaptive-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      max-width: 90%;
+      align-self: flex-start;
+      animation: fadeIn 0.2s ease;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+    .ac-textblock { margin: 2px 0; line-height: 1.4; }
+    .ac-textblock.size-large { font-size: 18px; font-weight: 600; }
+    .ac-textblock.size-medium { font-size: 15px; font-weight: 600; }
+    .ac-textblock.size-small { font-size: 13px; }
+    .ac-textblock.weight-bolder { font-weight: 600; }
+    .ac-textblock.color-accent { color: var(--primary); }
+    .ac-textblock.color-good { color: var(--success); }
+    .ac-textblock.color-warning { color: var(--warning); }
+    .ac-textblock.color-attention { color: var(--danger); }
+    .ac-columnset { display: flex; gap: 8px; padding: 4px 0; border-bottom: 1px solid #f0f0f0; }
+    .ac-column { flex: 1; }
+    .ac-column.width-auto { flex: 0 0 auto; }
+    .ac-factset { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 8px 0; }
+    .ac-fact-title { font-weight: 600; font-size: 13px; color: var(--text-muted); }
+    .ac-fact-value { font-size: 13px; }
+    .ac-separator { border-top: 1px solid var(--border); margin: 8px 0; }
+    .ac-container { margin: 4px 0; }
+    .ac-action-btn {
+      padding: 6px 12px; margin: 4px 4px 0 0;
+      border: 1px solid var(--primary); border-radius: 4px;
+      background: white; color: var(--primary);
+      cursor: pointer; font-size: 13px;
+    }
+    .ac-action-btn:hover { background: var(--primary); color: white; }
+
+    /* Input area */
+    .input-area {
+      padding: 12px 20px;
+      background: var(--card-bg);
+      border-top: 1px solid var(--border);
+      display: flex;
+      gap: 8px;
+    }
+    .input-area input {
+      flex: 1;
+      padding: 10px 14px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .input-area input:focus { border-color: var(--primary); }
+    .input-area button {
+      padding: 10px 20px;
+      background: var(--primary);
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      transition: background 0.15s;
+    }
+    .input-area button:hover { background: var(--primary-dark); }
+    .input-area button:disabled { opacity: 0.5; cursor: not-allowed; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>&#128202;</div>
+    <h1>QQIA Agent &#8212; FY27 Mint Rollover</h1>
+    <div class="status connected" id="statusIndicator">Connected</div>
+  </div>
+
+  <div class="quick-actions">
+    <button class="quick-btn" onclick="send('dashboard')">&#128202; Dashboard</button>
+    <button class="quick-btn" onclick="send('summary')">&#128200; Summary</button>
+    <button class="quick-btn" onclick="send('overdue')">&#9888;&#65039; Overdue</button>
+    <button class="quick-btn" onclick="send('blockers')">&#128721; Blockers</button>
+    <button class="quick-btn" onclick="send('upcoming')">&#128197; Upcoming</button>
+    <button class="quick-btn" onclick="send('critical path')">&#128279; Critical Path</button>
+    <button class="quick-btn" onclick="send('help')">&#10067; Help</button>
+  </div>
+
+  <div class="messages" id="messages">
+    <div class="message bot">
+      <div class="markdown">
+        <p>&#128075; Welcome to <strong>QQIA Agent</strong>! I help manage the FY27 Mint Rollover process.</p>
+        <p>Use the quick buttons above or type a command below. Try <strong>dashboard</strong> to get started!</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="input-area">
+    <input type="text" id="input" placeholder="Type a command (e.g., dashboard, status 1.A, update 1.A completed)..." autocomplete="off" />
+    <button id="sendBtn" onclick="sendInput()">Send</button>
+  </div>
+
+  <script>
+    const messagesEl = document.getElementById('messages');
+    const inputEl = document.getElementById('input');
+    const sendBtn = document.getElementById('sendBtn');
+    const statusEl = document.getElementById('statusIndicator');
+
+    inputEl.addEventListener('keydown', function(e) { if (e.key === 'Enter' && !sendBtn.disabled) sendInput(); });
+
+    // Check health on load
+    fetch('/api/health').then(function(r) { return r.json(); }).then(function(d) {
+      statusEl.textContent = 'Connected \u00B7 ' + d.trackedSteps + ' steps';
+      statusEl.className = 'status connected';
+    }).catch(function() {
+      statusEl.textContent = 'Disconnected';
+      statusEl.className = 'status disconnected';
+    });
+
+    function send(text) {
+      inputEl.value = text;
+      sendInput();
+    }
+
+    function sendInput() {
+      var text = inputEl.value.trim();
+      if (!text) return;
+
+      addMessage(text, 'user');
+      inputEl.value = '';
+      sendBtn.disabled = true;
+
+      var loadingEl = addMessage('Thinking...', 'bot loading');
+
+      fetch('/api/webhook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'message', text: text, from: { name: getUserName() } })
+      }).then(function(res) { return res.json(); }).then(function(data) {
+        loadingEl.remove();
+        if (data.attachments && data.attachments.length > 0) {
+          renderAdaptiveCard(data.attachments[0].content);
+        } else if (data.text) {
+          addMessage(data.text, 'bot', true);
+        } else {
+          addMessage('No response received.', 'bot error');
+        }
+        sendBtn.disabled = false;
+        inputEl.focus();
+      }).catch(function(err) {
+        loadingEl.remove();
+        addMessage('Error: ' + err.message, 'bot error');
+        sendBtn.disabled = false;
+        inputEl.focus();
+      });
+    }
+
+    function getUserName() {
+      if (!window._userName) {
+        window._userName = localStorage.getItem('qqia_username') || 'Teams User';
+      }
+      return window._userName;
+    }
+
+    function addMessage(text, classes, isMarkdown) {
+      var el = document.createElement('div');
+      el.className = 'message ' + classes;
+      if (isMarkdown) {
+        var md = document.createElement('div');
+        md.className = 'markdown';
+        md.innerHTML = renderMarkdown(text);
+        el.appendChild(md);
+      } else {
+        el.textContent = text;
+      }
+      messagesEl.appendChild(el);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+      return el;
+    }
+
+    function renderMarkdown(text) {
+      return text
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+        .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/^- (.+)$/gm, '<li>$1</li>')
+        .replace(/(<li>[\s\S]*?<\/li>)/g, function(m) { return '<ul>' + m + '</ul>'; })
+        .replace(/<\/ul>\s*<ul>/g, '')
+        .replace(/\n\n/g, '<br><br>')
+        .replace(/\n/g, '<br>');
+    }
+
+    function renderAdaptiveCard(card) {
+      var el = document.createElement('div');
+      el.className = 'adaptive-card';
+      if (card.body) {
+        card.body.forEach(function(item) { el.appendChild(renderCardElement(item)); });
+      }
+      if (card.actions) {
+        var actionsDiv = document.createElement('div');
+        actionsDiv.style.marginTop = '8px';
+        card.actions.forEach(function(action) {
+          var btn = document.createElement('button');
+          btn.className = 'ac-action-btn';
+          btn.textContent = action.title;
+          btn.onclick = function() {
+            if (action.type === 'Action.Submit' && action.data) {
+              handleCardAction(action.data);
+            }
+          };
+          actionsDiv.appendChild(btn);
+        });
+        el.appendChild(actionsDiv);
+      }
+      messagesEl.appendChild(el);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    function renderCardElement(item) {
+      var el = document.createElement('div');
+      switch (item.type) {
+        case 'TextBlock':
+          el.className = 'ac-textblock';
+          if (item.size) el.classList.add('size-' + item.size.toLowerCase());
+          if (item.weight) el.classList.add('weight-' + item.weight.toLowerCase());
+          if (item.color) el.classList.add('color-' + item.color.toLowerCase());
+          el.innerHTML = renderMarkdown(item.text || '');
+          if (item.wrap === false) { el.style.whiteSpace = 'nowrap'; el.style.overflow = 'hidden'; el.style.textOverflow = 'ellipsis'; }
+          break;
+        case 'ColumnSet':
+          el.className = 'ac-columnset';
+          (item.columns || []).forEach(function(col) {
+            var colEl = document.createElement('div');
+            colEl.className = 'ac-column';
+            if (col.width === 'auto') colEl.classList.add('width-auto');
+            else if (col.width && col.width !== 'stretch') colEl.style.flex = '0 0 ' + col.width;
+            (col.items || []).forEach(function(i) { colEl.appendChild(renderCardElement(i)); });
+            el.appendChild(colEl);
+          });
+          break;
+        case 'FactSet':
+          el.className = 'ac-factset';
+          (item.facts || []).forEach(function(f) {
+            var t = document.createElement('div'); t.className = 'ac-fact-title'; t.textContent = f.title;
+            var v = document.createElement('div'); v.className = 'ac-fact-value'; v.innerHTML = renderMarkdown(f.value || '');
+            el.appendChild(t); el.appendChild(v);
+          });
+          break;
+        case 'Container':
+          el.className = 'ac-container';
+          if (item.style === 'emphasis') el.style.background = '#f5f5f5';
+          (item.items || []).forEach(function(i) { el.appendChild(renderCardElement(i)); });
+          break;
+        case 'ActionSet':
+          (item.actions || []).forEach(function(action) {
+            var btn = document.createElement('button');
+            btn.className = 'ac-action-btn';
+            btn.textContent = action.title;
+            btn.onclick = function() { if (action.data) handleCardAction(action.data); };
+            el.appendChild(btn);
+          });
+          break;
+        default:
+          el.className = 'ac-textblock';
+          if (item.text) el.innerHTML = renderMarkdown(item.text);
+      }
+      if (item.separator) { var sep = document.createElement('div'); sep.className = 'ac-separator'; el.prepend(sep); }
+      return el;
+    }
+
+    function handleCardAction(data) {
+      fetch('/api/webhook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'message', text: '', value: data, from: { name: getUserName() } })
+      }).then(function(res) { return res.json(); }).then(function(result) {
+        if (result.attachments && result.attachments.length > 0) {
+          renderAdaptiveCard(result.attachments[0].content);
+        } else if (result.text) {
+          addMessage(result.text, 'bot', true);
+        }
+      }).catch(function(err) {
+        addMessage('Action error: ' + err.message, 'bot error');
+      });
+    }
+
+    // Username setup on first visit
+    if (!localStorage.getItem('qqia_username')) {
+      setTimeout(function() {
+        var name = prompt('Enter your name (as it appears in the rollover tracker):');
+        if (name) {
+          localStorage.setItem('qqia_username', name);
+          window._userName = name;
+        }
+      }, 500);
+    }
+  </script>
+</body>
+</html>
