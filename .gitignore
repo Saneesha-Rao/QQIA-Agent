@@ -6,3 +6,11 @@ dist/
 .env.production
 
 data/
+certs/
+
+# Teams Toolkit
+env/.env.*.user
+env/.env.local
+appPackage/build/
+.localConfigs
+devTools/
