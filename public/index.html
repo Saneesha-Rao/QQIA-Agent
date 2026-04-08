@@ -220,7 +220,8 @@
     };
     var msalInstance = null;
     var msalReady = false;
-    var graphScopes = ['Files.ReadWrite.All'];
+    var loginScopes = ['User.Read'];
+    var graphScopes = ['Files.ReadWrite'];
     var oneDrivePath = '/Seller Incentives/QQIA/FY27_Mint_RolloverTimeline.xlsx';
     var pendingSyncCount = 0;
 
@@ -250,7 +251,7 @@
         addMessage('Authentication is still loading. Please wait a moment and try again.', 'bot error');
         return;
       }
-      msalInstance.loginPopup({ scopes: graphScopes }).then(function(response) {
+      msalInstance.loginPopup({ scopes: loginScopes }).then(function(response) {
         msalInstance.setActiveAccount(response.account);
         showSignedIn(response.account);
         if (window._userName === 'Teams User' || !window._userName) {
@@ -259,7 +260,11 @@
         }
       }).catch(function(err) {
         console.error('Sign-in error:', err);
-        addMessage('Sign-in failed: ' + err.message, 'bot error');
+        if (err.errorCode === 'consent_required' || (err.message && err.message.indexOf('admin') !== -1)) {
+          addMessage('⚠️ Admin consent may be required. Ask your IT admin to approve the app, or try signing in again.', 'bot error');
+        } else {
+          addMessage('Sign-in failed: ' + err.message, 'bot error');
+        }
       });
     }
 
