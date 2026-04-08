@@ -188,8 +188,8 @@
     <button class="quick-btn" onclick="send('upcoming')">&#128197; Upcoming</button>
     <button class="quick-btn" onclick="send('critical path')">&#128279; Critical Path</button>
     <button class="quick-btn" onclick="send('help')">&#10067; Help</button>
-    <button class="quick-btn" id="syncNowBtn" onclick="triggerOfficeScriptSync()" style="margin-left:auto;color:var(--success);border-color:var(--success)">&#128260; Sync to Excel</button>
-    <button class="quick-btn" onclick="window.open('/api/download/excel','_blank')" style="color:var(--text-muted);border-color:var(--border)">&#128229; Download</button>
+    <button class="quick-btn" id="syncNowBtn" onclick="triggerOfficeScriptSync()" style="margin-left:auto;color:var(--success);border-color:var(--success)">&#128260; Sync Status</button>
+    <button class="quick-btn" id="downloadBtn" onclick="window.open('/api/download/excel','_blank')" style="color:var(--info);border-color:var(--info)">&#128229; Download Excel</button>
   </div>
 
   <div class="messages" id="messages">
@@ -217,16 +217,28 @@
       syncBtn.disabled = true;
 
       fetch('/api/steps/json').then(function(res) { return res.json(); }).then(function(data) {
-        // Copy the API URL to clipboard for the Office Script
-        navigator.clipboard.writeText(botApiUrl).then(function() {
-          addMessage('📋 **API URL copied to clipboard!**\n\nTo sync your OneDrive Excel:\n1. Open your Excel file in **Excel Online** (OneDrive)\n2. Click **Automate** tab → **New Script**\n3. Paste the Office Script from the Setup Sync instructions\n4. Click **Run**\n\n' +
-            '📊 Current data: **' + data.stepCount + ' steps** | Last update: ' + new Date(data.timestamp).toLocaleString() +
-            '\n\n✅ ' + data.steps.filter(function(s) { return s.status === 'Completed'; }).length + ' completed | ' +
-            '⏳ ' + data.steps.filter(function(s) { return s.status === 'In Progress'; }).length + ' in progress | ' +
-            '⚠️ ' + data.steps.filter(function(s) { return s.status === 'Overdue'; }).length + ' overdue', 'bot', true);
-        }).catch(function() {
-          addMessage('📊 API URL: `' + botApiUrl + '`\n\nCopy this URL and use it in the Office Script.', 'bot', true);
+        // Build tab-separated data: StepID | Corp Status | Corp Completed Date
+        var changedSteps = data.steps.filter(function(s) {
+          return s.lastModifiedBy && s.lastModifiedBy !== 'system';
         });
+        var allSteps = changedSteps.length > 0 ? changedSteps : data.steps;
+
+        var summary = '📊 **' + data.stepCount + ' steps** loaded\n' +
+          '✅ ' + data.steps.filter(function(s) { return s.status === 'Completed'; }).length + ' completed | ' +
+          '⏳ ' + data.steps.filter(function(s) { return s.status === 'In Progress'; }).length + ' in progress | ' +
+          '⚠️ ' + data.steps.filter(function(s) { return s.status === 'Overdue'; }).length + ' overdue\n\n';
+
+        if (changedSteps.length > 0) {
+          summary += '**' + changedSteps.length + ' steps modified by users:**\n';
+          changedSteps.forEach(function(s) {
+            summary += '- **' + s.stepId + '**: ' + s.status + (s.completedDate ? ' (' + s.completedDate + ')' : '') + ' — by ' + s.lastModifiedBy + '\n';
+          });
+          summary += '\n📥 Click **Download** to get the updated Excel file, then upload it to OneDrive.';
+        } else {
+          summary += 'No user-modified steps yet. Use `update <step> <status>` to make changes.';
+        }
+
+        addMessage(summary, 'bot', true);
         pendingSyncCount = 0;
         updateSyncBadge();
         syncBtn.textContent = '🔄 Sync to Excel';
@@ -334,15 +346,28 @@
 
     function updateSyncBadge() {
       var btn = document.getElementById('syncNowBtn');
+      var dlBtn = document.getElementById('downloadBtn');
       if (!btn) return;
       if (pendingSyncCount > 0) {
-        btn.textContent = '\uD83D\uDD04 Sync (' + pendingSyncCount + ' pending)';
+        btn.textContent = '\uD83D\uDD04 Sync (' + pendingSyncCount + ' changes)';
         btn.style.color = 'var(--warning)';
         btn.style.borderColor = 'var(--warning)';
+        if (dlBtn) {
+          dlBtn.textContent = '\uD83D\uDCE5 Download Excel (' + pendingSyncCount + ' new)';
+          dlBtn.style.color = 'var(--warning)';
+          dlBtn.style.borderColor = 'var(--warning)';
+          dlBtn.style.fontWeight = '600';
+        }
       } else {
-        btn.textContent = '\uD83D\uDD04 Sync to Excel';
+        btn.textContent = '\uD83D\uDD04 Sync Status';
         btn.style.color = 'var(--success)';
         btn.style.borderColor = 'var(--success)';
+        if (dlBtn) {
+          dlBtn.textContent = '\uD83D\uDCE5 Download Excel';
+          dlBtn.style.color = 'var(--info)';
+          dlBtn.style.borderColor = 'var(--info)';
+          dlBtn.style.fontWeight = '';
+        }
       }
     }
 
