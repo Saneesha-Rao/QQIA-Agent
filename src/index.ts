@@ -92,17 +92,11 @@ server.get('/', (req, res, next) => {
 });
 
 // Serve static files from public/ (MSAL bundle, etc.)
-const mimeTypes: Record<string, string> = { '.js': 'application/javascript', '.css': 'text/css', '.png': 'image/png', '.ico': 'image/x-icon' };
-server.get('/(.+\\.(js|css|png|ico))', (req, res, next) => {
-  const filePath = path.join(publicDir, req.params[0]);
-  const ext = path.extname(filePath);
+server.get('/msal-browser.min.js', (req, res, next) => {
+  const filePath = path.join(publicDir, 'msal-browser.min.js');
   fs.readFile(filePath, (err, data) => {
-    if (err) {
-      res.writeHead(404); res.end();
-    } else {
-      res.writeHead(200, { 'Content-Type': mimeTypes[ext] || 'application/octet-stream' });
-      res.end(data);
-    }
+    if (err) { res.writeHead(404); res.end(); }
+    else { res.writeHead(200, { 'Content-Type': 'application/javascript' }); res.end(data); }
     next(false);
   });
 });
