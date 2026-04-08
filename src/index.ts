@@ -101,6 +101,23 @@ server.post('/api/messages', async (req, res) => {
   });
 });
 
+// Download the updated Excel file
+server.get('/api/download/excel', (req, res, next) => {
+  const excelPath = path.join(__dirname, '..', 'data', 'FY27_Mint_RolloverTimeline.xlsx');
+  if (!fs.existsSync(excelPath)) {
+    res.send(404, { error: 'Excel file not found' });
+    return next();
+  }
+  const stat = fs.statSync(excelPath);
+  res.writeHead(200, {
+    'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'Content-Disposition': `attachment; filename="FY27_Mint_RolloverTimeline_${new Date().toISOString().split('T')[0]}.xlsx"`,
+    'Content-Length': stat.size,
+  });
+  fs.createReadStream(excelPath).pipe(res);
+  return next(false);
+});
+
 // Health check endpoint with status details
 server.get('/api/health', async (req, res) => {
   let stepCount = 0;
