@@ -27,7 +27,7 @@ export interface RolloverStep {
   fy26FedEnd: string | null;
   lastModified: string;
   lastModifiedBy: string;
-  lastModifiedSource: 'bot' | 'excel' | 'automation';
+  lastModifiedSource: 'bot' | 'excel' | 'automation' | 'webhook';
 }
 
 /** High-level milestone from HighLevelMilestones sheet */
@@ -81,7 +81,7 @@ export interface AuditEntry {
   newValue: string;
   changedBy: string;
   changedAt: string;
-  source: 'bot' | 'excel' | 'automation';
+  source: 'bot' | 'excel' | 'automation' | 'webhook';
   reason?: string;
 }
 

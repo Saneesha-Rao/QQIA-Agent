@@ -94,7 +94,7 @@ export class DataService {
     field: 'corpStatus' | 'fedStatus',
     newStatus: string,
     updatedBy: string,
-    source: 'bot' | 'excel' | 'automation'
+    source: 'bot' | 'excel' | 'automation' | 'webhook'
   ): Promise<RolloverStep | null> {
     const step = await this.getStep(stepId);
     if (!step) return null;
@@ -136,7 +136,7 @@ export class DataService {
     previousValue: string,
     newValue: string,
     changedBy: string,
-    source: 'bot' | 'excel' | 'automation',
+    source: 'bot' | 'excel' | 'automation' | 'webhook',
     reason?: string
   ): Promise<void> {
     const entry: AuditEntry = {

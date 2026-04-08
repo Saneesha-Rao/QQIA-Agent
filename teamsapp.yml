@@ -1,12 +1,12 @@
 # yaml-language-server: $schema=https://aka.ms/teams-toolkit/v1.7/yaml.schema.json
-# Visit https://aka.ms/teamsfx-v5.0-guide for details on this file
+# QQIA Agent - Teams Toolkit config (Codespace deployment - no Azure needed)
 
 version: v1.7
 
 environmentFolderPath: ./env
 
 provision:
-  # Creates a new Azure Active Directory (AAD) app to authenticate users
+  # Creates a new AAD app to authenticate the bot
   - uses: botAadApp/create
     with:
       name: QQIA-Agent-${{TEAMSFX_ENV}}
@@ -14,26 +14,22 @@ provision:
       botId: BOT_ID
       botPassword: SECRET_BOT_PASSWORD
 
+  # Register bot with Bot Framework (points to Codespace URL)
+  - uses: botFramework/create
+    with:
+      botId: ${{BOT_ID}}
+      name: QQIA-Agent
+      messagingEndpoint: https://${{BOT_DOMAIN}}/api/messages
+      description: "FY27 Mint Rollover Tracker"
+      channels:
+        - name: msteams
+
   # Creates a Teams app
   - uses: teamsApp/create
     with:
       name: QQIA Agent-${{TEAMSFX_ENV}}
     writeToEnvironmentFile:
       teamsAppId: TEAMS_APP_ID
-
-  # Deploy Bicep to Azure
-  - uses: arm/deploy
-    with:
-      subscriptionId: ${{AZURE_SUBSCRIPTION_ID}}
-      resourceGroupName: ${{AZURE_RESOURCE_GROUP_NAME}}
-      templates:
-        - path: ./infra/azure.bicep
-          parameters: ./infra/azure.parameters.json
-          deploymentName: qqia-agent-deploy
-      bicepCliVersion: v0.9.1
-    writeToEnvironmentFile:
-      botWebAppName: BOT_AZURE_APP_SERVICE_RESOURCE_ID
-      botWebAppEndpoint: BOT_DOMAIN
 
   # Validate the manifest
   - uses: teamsApp/validateManifest
@@ -51,20 +47,4 @@ provision:
   - uses: teamsApp/update
     with:
       appPackagePath: ./appPackage/build/appPackage.${{TEAMSFX_ENV}}.zip
-
-deploy:
-  # Install dependencies
-  - uses: cli/runNpmCommand
-    with:
-      args: install
-
-  # Build the project
-  - uses: cli/runNpmCommand
-    with:
-      args: run build
-
-  # Deploy to Azure App Service
-  - uses: azureAppService/zipDeploy
-    with:
-      artifactFolder: .
-      resourceId: ${{BOT_AZURE_APP_SERVICE_RESOURCE_ID}}
+projectId: fab0c121-96a8-478a-805c-c26450356686

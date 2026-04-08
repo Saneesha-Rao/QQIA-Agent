@@ -17,6 +17,7 @@ import { NotificationService } from './services/notificationService';
 import { GraphService } from './services/graphService';
 import { SyncEngine } from './services/syncEngine';
 import { ProactiveMessenger } from './services/proactiveMessenger';
+import { WebhookHandler } from './webhookHandler';
 import * as XLSX from 'xlsx';
 
 dotenv.config();
@@ -62,6 +63,12 @@ const syncEngine = new SyncEngine(dataService as any, graphService, dependencyEn
 // Create the bot with all services (pass PA sync and COM sync for SharePoint write-back)
 const bot = new QQIABot(dataService as any, dependencyEngine, excelSync, notificationService, paSyncService, comSync);
 
+// Create webhook handler for Teams Outgoing Webhook (no AAD/Azure required)
+const webhookHandler = new WebhookHandler(
+  dataService, dependencyEngine, excelSync, notificationService,
+  paSyncService, comSync, process.env.WEBHOOK_HMAC_SECRET
+);
+
 // ---- HTTP Server ----
 const server = restify.createServer();
 server.use(restify.plugins.bodyParser());
@@ -100,6 +107,25 @@ server.post('/api/sync', async (req, res) => {
     res.send(200, result);
   } catch (err: any) {
     res.send(500, { error: err.message });
+  }
+});
+
+// Teams Outgoing Webhook endpoint (no Azure/AAD required)
+server.post('/api/webhook', async (req, res) => {
+  try {
+    // Validate HMAC signature if configured
+    const authHeader = req.headers['authorization'] as string || '';
+    const rawBody = JSON.stringify(req.body);
+    if (!webhookHandler.validateSignature(rawBody, authHeader)) {
+      res.send(401, { error: 'Invalid HMAC signature' });
+      return;
+    }
+
+    const response = await webhookHandler.processRequest(req.body);
+    res.send(200, response);
+  } catch (err: any) {
+    console.error('Webhook error:', err);
+    res.send(200, { type: 'message', text: `❌ Error: ${err.message}` });
   }
 });
 
@@ -272,6 +298,7 @@ async function main() {
   server.listen(config.bot.port, () => {
     console.log(`\n✅ QQIA Agent listening on http://localhost:${config.bot.port}`);
     console.log(`   Bot endpoint:   POST /api/messages`);
+    console.log(`   Webhook:        POST /api/webhook  (Teams Outgoing Webhook)`);
     console.log(`   Health check:   GET  /api/health`);
     console.log(`   Manual sync:    POST /api/sync`);
     console.log(`   Auto-update:    POST /api/automation/status\n`);

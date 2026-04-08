@@ -49,5 +49,5 @@
     }
   ],
   "permissions": ["identity", "messageTeamMembers"],
-  "validDomains": []
+  "validDomains": ["${{BOT_DOMAIN}}"]
 }

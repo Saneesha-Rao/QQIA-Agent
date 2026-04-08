@@ -55,7 +55,7 @@ export class InMemoryDataService {
     field: 'corpStatus' | 'fedStatus',
     newStatus: string,
     updatedBy: string,
-    source: 'bot' | 'excel' | 'automation'
+    source: 'bot' | 'excel' | 'automation' | 'webhook'
   ): Promise<RolloverStep | null> {
     const step = this.steps.get(stepId);
     if (!step) return null;
@@ -93,7 +93,7 @@ export class InMemoryDataService {
     previousValue: string,
     newValue: string,
     changedBy: string,
-    source: 'bot' | 'excel' | 'automation',
+    source: 'bot' | 'excel' | 'automation' | 'webhook',
     reason?: string
   ): Promise<void> {
     this.audit.push({
