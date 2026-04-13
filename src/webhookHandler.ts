@@ -457,6 +457,12 @@ export class WebhookHandler {
     if (stepId && text.replace(/\s/g, '').length <= stepId.length + 2) {
       return this.handleStepQuery(`status ${stepId}`);
     }
+    // Handle natural language status queries like "what is the status of step 1.A"
+    if (stepId && (text.includes('status of') || text.includes('what is') || text.includes('what\'s') ||
+        text.includes('whats') || text.includes('check') || text.includes('show me') ||
+        text.includes('tell me') || text.includes('details') || text.includes('info'))) {
+      return this.handleStepQuery(`status ${stepId}`);
+    }
     if (stepId && (text.includes(' to ') || text.includes('completed') || text.includes('done') || text.includes('in progress') || text.includes('blocked'))) {
       return this.handleStatusUpdate(text, userName);
     }
