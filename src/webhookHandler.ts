@@ -516,6 +516,9 @@ export class WebhookHandler {
       return this.handleOverdue();
     } else if (text.includes('summary') || text.includes('leadership') || text.includes('exec') || text.includes('report')) {
       return this.handleSummary();
+    } else if (stepId) {
+      // If we found a step ID anywhere in the text, show its status
+      return this.handleStepQuery(`status ${stepId}`);
     } else {
       return this.textResponse(
         `I didn't understand that. Here are some things you can try:\n\n` +
