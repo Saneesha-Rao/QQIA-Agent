@@ -15,6 +15,7 @@ import { PowerAutomateSyncService } from './services/powerAutomateSyncService';
 import { ExcelComSyncService } from './services/excelComSyncService';
 import { NotificationService } from './services/notificationService';
 import { GraphService } from './services/graphService';
+import { DelegatedGraphService } from './services/delegatedGraphService';
 import { SyncEngine } from './services/syncEngine';
 import { ProactiveMessenger } from './services/proactiveMessenger';
 import { WebhookHandler } from './webhookHandler';
@@ -347,18 +348,47 @@ async function main() {
     console.warn(`⚠️ Data store init failed (${err.message}).`);
   }
 
-  // Initialize Graph API
+  // Initialize Graph API (app-only — client credentials)
   try {
     if (config.graph.clientId) {
       await graphService.initialize();
       console.log('✅ Graph API initialized');
-      // Enable Graph mode on ExcelSyncService — reads/writes go directly to SharePoint
       excelSync.enableGraphApi(graphService);
     } else {
       console.warn('⚠️ Graph API credentials not configured. Using local Excel file only.');
     }
   } catch (err: any) {
     console.warn(`⚠️ Graph API init failed (${err.message}). Using local Excel fallback.`);
+  }
+
+  // Initialize Delegated Graph API (device code flow — no app registration needed)
+  const delegatedGraph = new DelegatedGraphService();
+  const sharingUrl = process.env.EXCEL_SHARING_URL || '';
+  let excelDriveId = process.env.EXCEL_DRIVE_ID || '';
+  let excelItemId = process.env.EXCEL_ITEM_ID || '';
+
+  if (!config.graph.clientId && sharingUrl) {
+    try {
+      const authOk = await delegatedGraph.initialize();
+      if (authOk) {
+        // Resolve sharing URL to get drive/item IDs
+        if (!excelDriveId || !excelItemId) {
+          const resolved = await delegatedGraph.resolveShareLink(sharingUrl);
+          if (resolved) {
+            excelDriveId = resolved.driveId;
+            excelItemId = resolved.itemId;
+            console.log(`✅ Resolved Excel: ${resolved.name} (drive: ${excelDriveId.substring(0, 8)}..., item: ${excelItemId.substring(0, 8)}...)`);
+          }
+        }
+        // Enable delegated sync on the ExcelSyncService
+        if (excelDriveId && excelItemId) {
+          excelSync.enableDelegatedGraph(delegatedGraph, excelDriveId, excelItemId);
+          console.log('✅ Delegated Graph: real-time Excel sync enabled');
+        }
+      }
+    } catch (err: any) {
+      console.warn(`⚠️ Delegated Graph init failed: ${err.message}`);
+    }
   }
 
   // Seed data from Excel into the data store on startup

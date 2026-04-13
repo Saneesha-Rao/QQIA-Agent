@@ -24,6 +24,7 @@ export const config = {
     excelDriveId: process.env.EXCEL_DRIVE_ID || '',
     excelItemId: process.env.EXCEL_ITEM_ID || '',
     excelFilePath: process.env.EXCEL_FILE_PATH || '',
+    excelSharingUrl: process.env.EXCEL_SHARING_URL || '',
   },
   powerAutomate: {
     readFlowUrl: process.env.PA_READ_FLOW_URL || '',

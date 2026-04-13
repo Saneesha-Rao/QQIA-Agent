@@ -5,6 +5,7 @@ import { config } from '../config/appConfig';
 import { RolloverStep, Milestone, KeyBusinessDate, RaidEntry } from '../models/types';
 import { DataService } from './dataService';
 import { GraphService } from './graphService';
+import { DelegatedGraphService } from './delegatedGraphService';
 import {
   parseRolloverRow,
   parseMilestoneRow,
@@ -29,7 +30,11 @@ import {
 export class ExcelSyncService {
   private dataService: DataService;
   private graphService: GraphService | null = null;
+  private delegatedGraph: DelegatedGraphService | null = null;
+  private delegatedDriveId: string = '';
+  private delegatedItemId: string = '';
   private useGraphApi: boolean = false;
+  private useDelegatedGraph: boolean = false;
   /** The OneDrive/SharePoint source file (used for local fallback) */
   private sourceFilePath: string;
   /** Local writable working copy (under qqia-agent/data/) */
@@ -57,6 +62,15 @@ export class ExcelSyncService {
     this.graphService = graphService;
     this.useGraphApi = true;
     console.log('📡 Excel sync: Graph API mode enabled (SharePoint direct read/write)');
+  }
+
+  /** Enable delegated Graph mode (device code auth — user's own permissions) */
+  enableDelegatedGraph(delegatedGraph: DelegatedGraphService, driveId: string, itemId: string): void {
+    this.delegatedGraph = delegatedGraph;
+    this.delegatedDriveId = driveId;
+    this.delegatedItemId = itemId;
+    this.useDelegatedGraph = true;
+    console.log('📡 Excel sync: Delegated Graph mode enabled (real-time sync)');
   }
 
   // ---- Local file helpers ----
@@ -99,6 +113,9 @@ export class ExcelSyncService {
   async importFromExcel(): Promise<ImportResult> {
     const result: ImportResult = { steps: 0, milestones: 0, keyDates: 0, raidEntries: 0 };
 
+    if (this.useDelegatedGraph && this.delegatedGraph) {
+      return this.importFromExcelViaDelegated(result);
+    }
     if (this.useGraphApi && this.graphService) {
       return this.importFromExcelViaGraph(result);
     }
@@ -136,6 +153,40 @@ export class ExcelSyncService {
       return result;
     } catch (err: any) {
       console.warn(`Graph import failed (${err.message}), falling back to local file`);
+      return this.importFromExcelLocal(result);
+    }
+  }
+
+  /** Import via delegated Graph API — reads using user's own credentials */
+  private async importFromExcelViaDelegated(result: ImportResult): Promise<ImportResult> {
+    try {
+      const dg = this.delegatedGraph!;
+      const { values: rolloverRows } = await dg.getUsedRange(this.delegatedDriveId, this.delegatedItemId, 'FY27_Rollover');
+      for (let i = 3; i < rolloverRows.length; i++) {
+        const step = parseRolloverRow(rolloverRows[i], i);
+        if (step) {
+          await this.dataService.upsertStep(step);
+          result.steps++;
+        }
+      }
+
+      try {
+        const { values: msRows } = await dg.getUsedRange(this.delegatedDriveId, this.delegatedItemId, 'HighLevelMilestones');
+        for (let i = 2; i < msRows.length; i++) {
+          const ms = parseMilestoneRow(msRows[i], i);
+          if (ms) {
+            await this.dataService.upsertMilestone(ms);
+            result.milestones++;
+          }
+        }
+      } catch {
+        console.warn('HighLevelMilestones sheet not found via delegated Graph');
+      }
+
+      console.log(`📡 Delegated import: ${result.steps} steps, ${result.milestones} milestones`);
+      return result;
+    } catch (err: any) {
+      console.warn(`Delegated import failed (${err.message}), falling back to local file`);
       return this.importFromExcelLocal(result);
     }
   }
@@ -242,6 +293,9 @@ export class ExcelSyncService {
 
   /** Sync changes from the data store back to Excel */
   async syncToExcel(): Promise<number> {
+    if (this.useDelegatedGraph && this.delegatedGraph) {
+      return this.syncToExcelViaDelegated();
+    }
     if (this.useGraphApi && this.graphService) {
       return this.syncToExcelViaGraph();
     }
@@ -309,6 +363,74 @@ export class ExcelSyncService {
     }
 
     console.log(`📡 Graph sync: ${updatedCount} step(s) written to SharePoint Excel`);
+    return updatedCount;
+  }
+
+  /** Write-back via delegated Graph API — uses user's own credentials */
+  private async syncToExcelViaDelegated(): Promise<number> {
+    const dg = this.delegatedGraph!;
+    const steps = await this.dataService.getAllSteps();
+    const botUpdated = steps.filter(s =>
+      s.lastModifiedSource === 'bot' || s.lastModifiedSource === 'automation' || s.lastModifiedSource === 'webhook'
+    );
+    if (botUpdated.length === 0) return 0;
+
+    // Read current Excel to find row positions
+    const { values: rows } = await dg.getUsedRange(this.delegatedDriveId, this.delegatedItemId, 'FY27_Rollover');
+    const idToRow = new Map<string, number>();
+    for (let i = 3; i < rows.length; i++) {
+      const id = rows[i][0]?.toString().trim();
+      if (id) idToRow.set(id, i + 1); // +1 for 1-based Excel row numbering
+    }
+
+    let updatedCount = 0;
+    for (const step of botUpdated) {
+      const excelRow = idToRow.get(step.id);
+      if (!excelRow) continue;
+
+      try {
+        // Update Corp status (column F)
+        await dg.updateWorksheetRange(
+          this.delegatedDriveId, this.delegatedItemId,
+          'FY27_Rollover', `F${excelRow}`, [[step.corpStatus]]
+        );
+
+        // Update Corp completed date (column G)
+        if (step.corpCompletedDate) {
+          await dg.updateWorksheetRange(
+            this.delegatedDriveId, this.delegatedItemId,
+            'FY27_Rollover', `G${excelRow}`, [[step.corpCompletedDate]]
+          );
+        }
+
+        // Update Fed status (column J)
+        if (step.fedStatus) {
+          await dg.updateWorksheetRange(
+            this.delegatedDriveId, this.delegatedItemId,
+            'FY27_Rollover', `J${excelRow}`, [[step.fedStatus]]
+          );
+        }
+
+        // Update reference notes (column S)
+        if (step.referenceNotes) {
+          await dg.updateWorksheetRange(
+            this.delegatedDriveId, this.delegatedItemId,
+            'FY27_Rollover', `S${excelRow}`, [[step.referenceNotes]]
+          );
+        }
+
+        updatedCount++;
+        console.log(`📡 Delegated: updated step ${step.id} in SharePoint Excel`);
+
+        // Reset source so it won't re-write on next cycle
+        step.lastModifiedSource = 'excel';
+        await this.dataService.upsertStep(step);
+      } catch (err: any) {
+        console.error(`📡 Delegated: failed to update step ${step.id}: ${err.message}`);
+      }
+    }
+
+    console.log(`📡 Delegated sync: ${updatedCount} step(s) written to SharePoint Excel`);
     return updatedCount;
   }
 
