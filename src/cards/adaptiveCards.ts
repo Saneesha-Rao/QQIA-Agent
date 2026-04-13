@@ -6,6 +6,27 @@ import { WorkstreamStats } from '../services/dependencyEngine';
  * Uses the Adaptive Cards schema (v1.5) for rich interactive messages.
  */
 
+/** Format a date value (ISO string or Excel serial number) to readable format */
+function formatDate(value: string | number | null): string {
+  if (!value) return 'TBD';
+  const str = value.toString().trim();
+  if (!str || str === 'TBD' || str === '-') return 'TBD';
+  // Check if it's a pure number (Excel serial date)
+  const num = Number(str);
+  if (!isNaN(num) && num > 40000 && num < 60000) {
+    const excelEpoch = new Date(1900, 0, 1);
+    const dayOffset = num > 59 ? num - 2 : num - 1;
+    const date = new Date(excelEpoch.getTime() + dayOffset * 86400000);
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }
+  // Try parsing as ISO date string
+  const date = new Date(str);
+  if (!isNaN(date.getTime())) {
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }
+  return str;
+}
+
 /** Overall rollover progress dashboard card */
 export function buildOverallDashboardCard(
   allSteps: RolloverStep[],
@@ -105,8 +126,8 @@ export function buildStepDetailCard(step: RolloverStep, blockers: string[], bloc
         facts: [
           { title: 'Corp Status', value: step.corpStatus },
           { title: 'Fed Status', value: step.fedStatus },
-          { title: 'Corp Dates', value: `${step.corpStartDate || 'TBD'} → ${step.corpEndDate || 'TBD'}` },
-          { title: 'Fed Dates', value: `${step.fedStartDate || 'TBD'} → ${step.fedEndDate || 'TBD'}` },
+          { title: 'Corp Dates', value: `${formatDate(step.corpStartDate)} → ${formatDate(step.corpEndDate)}` },
+          { title: 'Fed Dates', value: `${formatDate(step.fedStartDate)} → ${formatDate(step.fedEndDate)}` },
           { title: 'WWIC POC', value: step.wwicPoc || '-' },
           { title: 'Fed POC', value: step.fedPoc || '-' },
           { title: 'Engineering DRI', value: step.engineeringDri || '-' },
@@ -177,7 +198,7 @@ export function buildStepListCard(title: string, steps: RolloverStep[], track: '
         { type: 'Column', width: 'stretch', items: [{ type: 'TextBlock', text: step.description, size: 'Small', wrap: true }] },
         { type: 'Column', width: '100px', items: [{ type: 'TextBlock', text: step.workstream || '-', size: 'Small', wrap: true, isSubtle: true }] },
         { type: 'Column', width: '75px', items: [{ type: 'TextBlock', text: `${statusEmoji(status)} ${status}`, size: 'Small' }] },
-        { type: 'Column', width: '75px', items: [{ type: 'TextBlock', text: endDate || 'TBD', size: 'Small', isSubtle: true }] },
+        { type: 'Column', width: '75px', items: [{ type: 'TextBlock', text: formatDate(endDate), size: 'Small', isSubtle: true }] },
       ],
     };
   });
@@ -219,7 +240,7 @@ export function buildMyTasksCard(ownerName: string, steps: RolloverStep[]): any 
       { type: 'Column', width: 'stretch', items: [{ type: 'TextBlock', text: step.description, size: 'Small', wrap: true }] },
       { type: 'Column', width: '100px', items: [{ type: 'TextBlock', text: step.workstream || '-', size: 'Small', wrap: true, isSubtle: true }] },
       { type: 'Column', width: '75px', items: [{ type: 'TextBlock', text: step.corpStatus, size: 'Small' }] },
-      { type: 'Column', width: '75px', items: [{ type: 'TextBlock', text: step.corpEndDate || 'TBD', size: 'Small' }] },
+      { type: 'Column', width: '75px', items: [{ type: 'TextBlock', text: formatDate(step.corpEndDate), size: 'Small' }] },
     ],
     selectAction: { type: 'Action.Submit', data: { action: 'view_step', stepId: step.id } },
   }));
