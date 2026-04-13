@@ -2,8 +2,8 @@
 export const config = {
   bot: {
     port: parseInt(process.env.PORT || '3978'),
-    appId: process.env.MICROSOFT_APP_ID || '',
-    appPassword: process.env.MICROSOFT_APP_PASSWORD || '',
+    appId: process.env.MICROSOFT_APP_ID || process.env.BOT_ID || '',
+    appPassword: process.env.MICROSOFT_APP_PASSWORD || process.env.SECRET_BOT_PASSWORD || '',
     tenantId: process.env.MICROSOFT_APP_TENANT_ID || '',
   },
   cosmos: {

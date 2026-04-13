@@ -1,16 +1,18 @@
 {
   "name": "QQIA Agent",
   "image": "mcr.microsoft.com/devcontainers/typescript-node:20",
+  "features": {
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
   "forwardPorts": [3978],
   "portsAttributes": {
     "3978": {
       "label": "QQIA Bot",
-      "onAutoForward": "notify",
-      "visibility": "private"
+      "onAutoForward": "notify"
     }
   },
   "postCreateCommand": "npm install && npm run build",
-  "postStartCommand": "npm start",
+  "postStartCommand": "bash .devcontainer/start.sh",
   "customizations": {
     "vscode": {
       "extensions": [
