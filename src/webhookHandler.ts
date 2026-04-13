@@ -73,6 +73,12 @@ export class WebhookHandler {
     let text = (body.text || '').trim();
     const fromName = userName || body.from?.name || 'Unknown';
 
+    // Handle card action button clicks (Action.Submit sends data in body.value)
+    const actionData = body.value;
+    if (actionData && actionData.action) {
+      return this.handleActionData(actionData, fromName);
+    }
+
     // Strip @mention (Teams prepends "<at>BotName</at> " to the message)
     text = text.replace(/<at>.*?<\/at>\s*/gi, '').trim();
 
@@ -145,6 +151,25 @@ export class WebhookHandler {
         content: card,
       }],
     };
+  }
+
+  /** Handle button clicks from Adaptive Card actions */
+  private async handleActionData(data: any, userName: string): Promise<WebhookResponse> {
+    if (data.action === 'update_status') {
+      const { stepId, field, newStatus } = data;
+      const step = await this.dataService.updateStepStatus(
+        stepId, field, newStatus, userName, 'webhook'
+      );
+      if (!step) {
+        return this.textResponse(`Step **${stepId}** not found.`);
+      }
+      return this.textResponse(
+        `✅ Step **${stepId}** ${field === 'fedStatus' ? '(Fed)' : '(Corp)'} updated to **${newStatus}** by ${userName}.`
+      );
+    } else if (data.action === 'view_step') {
+      return this.handleStepQuery(`status ${data.stepId}`);
+    }
+    return this.textResponse('Unknown action.');
   }
 
   private extractStepId(text: string): string | null {
@@ -457,14 +482,25 @@ export class WebhookHandler {
     if (stepId && text.replace(/\s/g, '').length <= stepId.length + 2) {
       return this.handleStepQuery(`status ${stepId}`);
     }
+    // Handle updates BEFORE queries — "change status of 15.B to completed" has both "status of" and "completed"
+    if (stepId && (text.includes('change') || text.includes(' to ') || text.includes('completed') || text.includes('done') ||
+        text.includes('in progress') || text.includes('blocked') || text.includes('complete') ||
+        text.includes('mark') || text.includes('set'))) {
+      // Extract the target status
+      let newStatus = 'Completed';
+      if (text.includes('in progress') || text.includes('in-progress') || text.includes('started')) newStatus = 'In Progress';
+      else if (text.includes('blocked') || text.includes('block')) newStatus = 'Blocked';
+      else if (text.includes('not started') || text.includes('reset')) newStatus = 'Not Started';
+      const field = text.includes('fed') ? 'fedStatus' : 'corpStatus';
+      const step = await this.dataService.updateStepStatus(stepId, field as any, newStatus, userName, 'webhook');
+      if (!step) return this.textResponse(`Step **${stepId}** not found.`);
+      return this.textResponse(`✅ Step **${stepId}** ${field === 'fedStatus' ? '(Fed)' : '(Corp)'} updated to **${newStatus}** by ${userName}.`);
+    }
     // Handle natural language status queries like "what is the status of step 1.A"
     if (stepId && (text.includes('status of') || text.includes('what is') || text.includes('what\'s') ||
         text.includes('whats') || text.includes('check') || text.includes('show me') ||
         text.includes('tell me') || text.includes('details') || text.includes('info'))) {
       return this.handleStepQuery(`status ${stepId}`);
-    }
-    if (stepId && (text.includes(' to ') || text.includes('completed') || text.includes('done') || text.includes('in progress') || text.includes('blocked'))) {
-      return this.handleStatusUpdate(text, userName);
     }
 
     const isPersonal = /\b(i |i'[a-z]|my |me |mine)\b/.test(text) || text.startsWith('do i ') || text.startsWith('what do i');
