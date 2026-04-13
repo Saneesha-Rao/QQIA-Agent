@@ -1,0 +1,21 @@
+{
+  "name": "QQIA Agent",
+  "image": "mcr.microsoft.com/devcontainers/typescript-node:20",
+  "forwardPorts": [3978],
+  "portsAttributes": {
+    "3978": {
+      "label": "QQIA Bot",
+      "onAutoForward": "notify",
+      "visibility": "private"
+    }
+  },
+  "postCreateCommand": "npm install && npm run build",
+  "postStartCommand": "npm start",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-teams-vscode-extension.teams-toolkit"
+      ]
+    }
+  }
+}

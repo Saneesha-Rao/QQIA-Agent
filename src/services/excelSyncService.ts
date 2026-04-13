@@ -11,6 +11,8 @@ import {
   parseKeyBusinessDateRow,
   parseRaidRow,
   isoToExcelDate,
+  normalizeStatus,
+  parseDependencies,
 } from '../utils/excelParser';
 
 /**
@@ -138,8 +140,25 @@ export class ExcelSyncService {
     }
   }
 
-  /** Import from local file */
+  /** Import from local file (xlsx or CSV fallback) */
   private async importFromExcelLocal(result: ImportResult): Promise<ImportResult> {
+    // Try xlsx first, then fall back to CSV
+    if (fs.existsSync(this.localFilePath)) {
+      return this.importFromExcelFile(result);
+    }
+
+    // CSV fallback — look for the bundled CSV in data/
+    const csvPath = path.join(path.dirname(this.localFilePath), 'FY27_Rollover_Dataverse.csv');
+    if (fs.existsSync(csvPath)) {
+      return this.importFromCSV(csvPath, result);
+    }
+
+    console.warn('⚠️ No Excel or CSV file found for import');
+    return result;
+  }
+
+  /** Import from .xlsx file */
+  private async importFromExcelFile(result: ImportResult): Promise<ImportResult> {
     const wb = XLSX.readFile(this.localFilePath);
 
     const rolloverSheet = wb.Sheets['FY27_Rollover'];
@@ -167,6 +186,55 @@ export class ExcelSyncService {
     }
 
     console.log(`📁 Local import: ${result.steps} steps, ${result.milestones} milestones`);
+    return result;
+  }
+
+  /** Import from CSV file (used when xlsx not available, e.g. cloud deploy) */
+  private async importFromCSV(csvPath: string, result: ImportResult): Promise<ImportResult> {
+    const csvContent = fs.readFileSync(csvPath, 'utf-8');
+    const wb = XLSX.read(csvContent, { type: 'string' });
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+
+    // CSV has a header row at index 0, data starts at index 1
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i];
+      const stepId = row[0]?.toString().trim();
+      if (!stepId || stepId === 'StepId' || stepId === '') continue;
+
+      const step: RolloverStep = {
+        id: stepId,
+        workstream: (row[1] || '').toString().trim(),
+        description: (row[2] || '').toString().trim(),
+        corpStartDate: (row[3] || '').toString().trim() || null,
+        corpEndDate: (row[4] || '').toString().trim() || null,
+        corpStatus: normalizeStatus(row[5]) as any,
+        corpCompletedDate: (row[6] || '').toString().trim() || null,
+        fedStartDate: (row[7] || '').toString().trim() || null,
+        fedEndDate: (row[8] || '').toString().trim() || null,
+        fedStatus: normalizeStatus(row[9]) as any,
+        setupValidation: (row[10] || '').toString().trim(),
+        engineeringDependent: (row[11] || '').toString().trim(),
+        wwicPoc: (row[12] || '').toString().trim(),
+        fedPoc: (row[13] || '').toString().trim(),
+        engineeringDri: (row[14] || '').toString().trim(),
+        engineeringLead: (row[15] || '').toString().trim(),
+        dependencies: parseDependencies(row[16]?.toString()),
+        adoLink: (row[17] || '').toString().trim(),
+        referenceNotes: (row[18] || '').toString().trim(),
+        fy26CorpStart: null,
+        fy26CorpEnd: null,
+        fy26FedStart: null,
+        fy26FedEnd: null,
+        lastModified: new Date().toISOString(),
+        lastModifiedBy: 'system',
+        lastModifiedSource: 'excel',
+      };
+      await this.dataService.upsertStep(step);
+      result.steps++;
+    }
+
+    console.log(`📁 CSV import: ${result.steps} steps`);
     return result;
   }
 

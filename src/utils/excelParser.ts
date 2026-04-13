@@ -133,7 +133,7 @@ export function parseRaidRow(row: any[], index: number): RaidEntry | null {
 }
 
 /** Normalize status values from Excel to our canonical set */
-function normalizeStatus(value: any): any {
+export function normalizeStatus(value: any): any {
   if (!value) return 'Not Started';
   const s = value.toString().trim().toLowerCase();
   if (s === 'completed' || s === 'complete' || s === 'done') return 'Completed';
