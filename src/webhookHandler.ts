@@ -565,6 +565,7 @@ export class WebhookHandler {
 
   /** Fallback handler for natural language queries */
   private async handleNaturalLanguage(text: string, userName: string): Promise<WebhookResponse> {
+    console.log(`[NL] Input: "${text}"`);
     const stepId = this.extractStepId(text);
     if (stepId && text.replace(/\s/g, '').length <= stepId.length + 2) {
       return this.handleStepQuery(`status ${stepId}`);
@@ -644,11 +645,13 @@ export class WebhookHandler {
         text.includes('due') || text.includes('upcoming') || text.includes('work') ||
         text.includes('action item') || text.includes('items') ||
         text.includes('this week') || text.includes('this month') || text.includes('next'))) {
+      console.log(`[NL] Detected name: "${detectedName}", timeMatch: ${!!timeMatch}, days: ${lookAheadDays}`);
       // Check if name is a team/workstream first
       const teamResult = await this.handleTeamQuery(detectedName);
-      if (teamResult) return teamResult;
+      if (teamResult) { console.log(`[NL] Routed to team query`); return teamResult; }
       // Otherwise treat as person — filter by time if time was mentioned
       if (timeMatch) {
+        console.log(`[NL] Routed to owner upcoming: ${detectedName}, ${lookAheadDays} days`);
         return this.handleOwnerUpcoming(detectedName, lookAheadDays);
       }
       return this.handleOwnerTasks(`tasks for ${detectedName}`);
