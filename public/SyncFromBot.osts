@@ -47,24 +47,30 @@ async function main(workbook: ExcelScript.Workbook) {
   }
   console.log("Using sheet: " + sheet.getName());
 
+  // Use a specific range instead of getUsedRange() which returns full rows
+  // Columns: A=StepId, B=Workstream, ..., F=CorpStatus, G=CorpCompletedDate, ..., J=FedStatus
+  // Get row count from usedRange address
   var usedRange = sheet.getUsedRange();
   if (!usedRange) {
-    console.log("Sheet has no data (usedRange null)");
+    console.log("Sheet has no data");
     return;
   }
-  console.log("UsedRange address: " + usedRange.getAddress());
-  var values = usedRange.getValues();
+  var address = usedRange.getAddress();
+  console.log("UsedRange address: " + address);
+  
+  // Read columns A through S (19 columns) for all used rows  
+  var lastRow = usedRange.getRowCount();
+  console.log("Row count: " + lastRow);
+  var dataRange = sheet.getRange("A1:S" + lastRow);
+  var values = dataRange.getValues();
   if (!values || values.length === 0) {
-    console.log("Sheet values empty or null");
+    console.log("No values in range A1:S" + lastRow);
     return;
   }
-  console.log("Sheet has " + values.length + " rows, " + values[0].length + " columns");
-  console.log("First row sample: " + String(values[0][0]) + " | " + String(values[0][1]));
-  if (values.length > 1) {
-    console.log("Second row sample: " + String(values[1][0]) + " | " + String(values[1][1]));
-  }
+  console.log("Got " + values.length + " rows x " + values[0].length + " columns");
+  console.log("Row 1: " + String(values[0][0]) + " | " + String(values[0][1]));
   if (values.length > 3) {
-    console.log("Row 4 sample: " + String(values[3][0]) + " | " + String(values[3][1]));
+    console.log("Row 4: " + String(values[3][0]) + " | " + String(values[3][1]) + " | Status: " + String(values[3][5]));
   }
   
   var updated = 0;
