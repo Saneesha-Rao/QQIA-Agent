@@ -480,15 +480,22 @@ export class WebhookHandler {
 
     if (filtered.length === 0) {
       const label = days <= 7 ? 'this week' : `next ${days} days`;
-      // Show all their pending tasks as fallback
-      const pending = steps.filter(s => s.corpStatus !== 'Completed' && s.corpStatus !== 'N/A');
+      // Show the next 5 soonest upcoming items instead of dumping all pending
+      const pending = steps.filter(s => s.corpStatus !== 'Completed' && s.corpStatus !== 'N/A')
+        .sort((a, b) => {
+          const da = a.corpEndDate ? new Date(a.corpEndDate).getTime() : Infinity;
+          const db = b.corpEndDate ? new Date(b.corpEndDate).getTime() : Infinity;
+          return da - db;
+        });
       if (pending.length > 0) {
+        const nextFew = pending.slice(0, 5);
+        const nextDate = nextFew[0].corpEndDate ? new Date(nextFew[0].corpEndDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'TBD';
         const card = buildStepListCard(
-          `📅 ${name} — No items due ${label}, showing ${pending.length} pending`,
-          pending, 'Corp');
+          `📅 ${name} — No items due ${label}. Next soonest (${pending.length} total pending, earliest: ${nextDate})`,
+          nextFew, 'Corp');
         return this.cardResponse(card);
       }
-      return this.textResponse(`No upcoming steps for **${name}** ${label}.`);
+      return this.textResponse(`No upcoming steps for **${name}** ${label}. All ${steps.length} steps are completed! ✅`);
     }
     const label = days <= 7 ? 'This Week' : `Next ${days} Days`;
     const card = buildStepListCard(`📅 ${name} — ${label} (${filtered.length} steps)`, filtered, 'Corp');
