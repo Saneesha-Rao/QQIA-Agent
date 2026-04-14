@@ -361,39 +361,9 @@ async function main() {
     console.warn(`⚠️ Graph API init failed (${err.message}). Using local Excel fallback.`);
   }
 
-  // Initialize Delegated Graph API (device code flow — no app registration needed)
-  const delegatedGraph = new DelegatedGraphService();
-  const sharingUrl = process.env.EXCEL_SHARING_URL || '';
-  let excelDriveId = process.env.EXCEL_DRIVE_ID || '';
-  let excelItemId = process.env.EXCEL_ITEM_ID || '';
-
-  console.log(`📡 Delegated Graph check: GRAPH_CLIENT_ID=${config.graph.clientId ? 'set' : 'empty'}, EXCEL_SHARING_URL=${sharingUrl ? 'set (' + sharingUrl.substring(0, 30) + '...)' : 'empty'}`);
-
-  if (!config.graph.clientId && sharingUrl) {
-    console.log('📡 Attempting delegated Graph auth (device code flow)...');
-    try {
-      const authOk = await delegatedGraph.initialize();
-      console.log(`📡 Delegated Graph initialize result: ${authOk}`);
-      if (authOk) {
-        // Resolve sharing URL to get drive/item IDs
-        if (!excelDriveId || !excelItemId) {
-          const resolved = await delegatedGraph.resolveShareLink(sharingUrl);
-          if (resolved) {
-            excelDriveId = resolved.driveId;
-            excelItemId = resolved.itemId;
-            console.log(`✅ Resolved Excel: ${resolved.name} (drive: ${excelDriveId.substring(0, 8)}..., item: ${excelItemId.substring(0, 8)}...)`);
-          }
-        }
-        // Enable delegated sync on the ExcelSyncService
-        if (excelDriveId && excelItemId) {
-          excelSync.enableDelegatedGraph(delegatedGraph, excelDriveId, excelItemId);
-          console.log('✅ Delegated Graph: real-time Excel sync enabled');
-        }
-      }
-    } catch (err: any) {
-      console.warn(`⚠️ Delegated Graph init failed: ${err.message}`);
-    }
-  }
+  // Delegated Graph API disabled — Conditional Access blocks device code flow from Codespace.
+  // Excel sync is done via Office Script instead: the Excel file pulls from /api/steps/json.
+  console.log('📡 Excel sync mode: Office Script (Excel pulls from /api/steps/json)');
 
   // Seed data from Excel into the data store on startup
   try {
