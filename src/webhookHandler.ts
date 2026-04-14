@@ -486,6 +486,37 @@ export class WebhookHandler {
     return this.handleDashboard('Fed');
   }
 
+  /** Match a candidate name against workstream or engineering team, return steps or null */
+  private async handleTeamQuery(candidate: string): Promise<WebhookResponse | null> {
+    const allSteps = await this.dataService.getAllSteps();
+    const lower = candidate.toLowerCase();
+
+    // Match against workstream names (fuzzy contains)
+    const workstreams = [...new Set(allSteps.map(s => s.workstream))];
+    const wsMatch = workstreams.find(ws =>
+      ws.toLowerCase().includes(lower) || lower.includes(ws.toLowerCase())
+    );
+    if (wsMatch) {
+      const steps = allSteps.filter(s => s.workstream === wsMatch);
+      const card = buildStepListCard(`📦 ${wsMatch} (${steps.length} steps)`, steps, 'Corp');
+      return this.cardResponse(card);
+    }
+
+    // Match against engineeringDependent values (e.g., "orchestration" → "Y - Orchestration")
+    const engTeams = [...new Set(allSteps.map(s => s.engineeringDependent).filter(e => e && e !== 'N' && e !== 'Y'))];
+    const engMatch = engTeams.find(et =>
+      et.toLowerCase().includes(lower) || lower.includes(et.replace(/^Y\s*-?\s*/i, '').toLowerCase())
+    );
+    if (engMatch) {
+      const steps = allSteps.filter(s => s.engineeringDependent === engMatch);
+      const label = engMatch.replace(/^Y\s*-?\s*/i, '').trim();
+      const card = buildStepListCard(`🔧 ${label} Team (${steps.length} steps)`, steps, 'Corp');
+      return this.cardResponse(card);
+    }
+
+    return null; // No team match found
+  }
+
   /** Fallback handler for natural language queries */
   private async handleNaturalLanguage(text: string, userName: string): Promise<WebhookResponse> {
     const stepId = this.extractStepId(text);
@@ -524,6 +555,15 @@ export class WebhookHandler {
       else if (timeMatch[4]) lookAheadDays = parseInt(timeMatch[4]);
     }
 
+    // Detect team/group queries — "action items for MSC team", "activities for orchestration"
+    const teamMatch = text.match(/(?:action items|tasks?|activities|items|steps|work|upcoming|what(?:'s| is| are))\s+(?:for|of|from|by|in|under)\s+(?:the\s+)?(.+?)(?:\s+team|\s+group)?(?:\s+(?:this|next|that|due|need)|[?.]|$)/i)
+      || text.match(/(?:what(?:'s| is| are)\s+)?(?:the\s+)?(.+?)(?:\s+team|\s+group)'s\s+(?:action items|tasks?|activities|items|steps|work|upcoming)/i);
+    if (teamMatch) {
+      const candidate = teamMatch[1].replace(/\s+team$|\s+group$/i, '').trim();
+      const teamResult = await this.handleTeamQuery(candidate);
+      if (teamResult) return teamResult;
+    }
+
     // Detect mentioned person
     let mentionedPerson: string | null = null;
     const possessiveMatch = text.match(/(?:what(?:'s| is| are)\s+)?(\w[\w\s]*?)'s\s+(?:tasks?|activities|steps|items|work|upcoming)/i);
@@ -536,7 +576,11 @@ export class WebhookHandler {
     if (mentionedPerson && (text.includes('task') || text.includes('activities') || text.includes('step') ||
         text.includes('need') || text.includes('start') || text.includes('do') ||
         text.includes('due') || text.includes('upcoming') || text.includes('work') ||
+        text.includes('action items') || text.includes('items') ||
         text.includes('this week') || text.includes('this month'))) {
+      // Check if mentioned person is actually a team name
+      const personTeamResult = await this.handleTeamQuery(mentionedPerson);
+      if (personTeamResult) return personTeamResult;
       return this.handleOwnerTasks(`tasks for ${mentionedPerson}`);
     } else if (isPersonal && (text.includes('activities') || text.includes('task') || text.includes('upcoming') ||
         text.includes('need to') || text.includes('start') || text.includes('do') ||
