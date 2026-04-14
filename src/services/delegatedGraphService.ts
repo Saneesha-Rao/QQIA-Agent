@@ -14,8 +14,8 @@ export class DelegatedGraphService {
   private accountInfo: msal.AccountInfo | null = null;
   private _isAuthenticated = false;
 
-  // Microsoft's first-party Azure CLI client ID — public, no secret needed
-  private static readonly CLIENT_ID = '04b07795-a71b-4346-935c-03553cd355bd';
+  // Microsoft Graph PowerShell well-known client ID — public, supports device code flow
+  private static readonly CLIENT_ID = '14d82eec-204b-4c2f-b7e8-296a70dab67e';
   private static readonly AUTHORITY = 'https://login.microsoftonline.com/organizations';
   private static readonly SCOPES = [
     'https://graph.microsoft.com/Files.ReadWrite',
@@ -44,11 +44,21 @@ export class DelegatedGraphService {
       const deviceCodeRequest: msal.DeviceCodeRequest = {
         scopes: DelegatedGraphService.SCOPES,
         deviceCodeCallback: (response) => {
+          // Log all properties to debug what the SDK actually provides
+          console.log('[DeviceCode] Full response keys:', Object.keys(response));
+          console.log('[DeviceCode] Full response:', JSON.stringify(response, null, 2));
+          const uri = (response as any).verificationUri || (response as any).verification_uri || (response as any).verificationUrl;
+          const code = (response as any).userCode || (response as any).user_code;
+          const msg = (response as any).message;
           console.log('\n' + '='.repeat(60));
           console.log('🔑 SIGN IN REQUIRED FOR EXCEL SYNC');
           console.log('='.repeat(60));
-          console.log(`👉 Open: ${response.verificationUri}`);
-          console.log(`👉 Enter code: ${response.userCode}`);
+          if (msg) {
+            console.log(msg);
+          } else {
+            console.log(`👉 Open: ${uri || 'https://microsoft.com/devicelogin'}`);
+            console.log(`👉 Enter code: ${code || 'see above'}`);
+          }
           console.log('='.repeat(60) + '\n');
         },
       };
