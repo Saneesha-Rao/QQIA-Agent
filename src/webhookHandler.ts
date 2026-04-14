@@ -542,7 +542,9 @@ export class WebhookHandler {
   /** Match a candidate name against workstream or engineering team, return steps or null */
   private async handleTeamQuery(candidate: string): Promise<WebhookResponse | null> {
     const allSteps = await this.dataService.getAllSteps();
-    const lower = candidate.toLowerCase();
+    // Clean up candidate: strip "team", "teams", "group" suffix
+    const lower = candidate.toLowerCase().replace(/\s+teams?$|\s+groups?$/i, '').trim();
+    console.log(`[TeamQuery] candidate="${candidate}" cleaned="${lower}"`);
 
     // Match against workstream names (fuzzy contains)
     const workstreams = [...new Set(allSteps.map(s => s.workstream))];
@@ -551,6 +553,7 @@ export class WebhookHandler {
     );
     if (wsMatch) {
       const steps = allSteps.filter(s => s.workstream === wsMatch);
+      console.log(`[TeamQuery] Matched workstream "${wsMatch}" with ${steps.length} steps`);
       const card = buildStepListCard(`📦 ${wsMatch} (${steps.length} steps)`, steps, 'Corp');
       return this.cardResponse(card);
     }
@@ -573,6 +576,24 @@ export class WebhookHandler {
   /** Fallback handler for natural language queries */
   private async handleNaturalLanguage(text: string, userName: string): Promise<WebhookResponse> {
     console.log(`[NL] Input: "${text}"`);
+
+    // Early team/group detection: if text mentions "team" or "group" along with activity words,
+    // extract the team name and try team query first
+    if ((text.includes('team') || text.includes('group')) &&
+        (text.includes('action') || text.includes('task') || text.includes('activit') ||
+         text.includes('item') || text.includes('step') || text.includes('work'))) {
+      // Extract everything that looks like a team name
+      const teamExtract = text
+        .replace(/\b(?:what|are|is|the|show|me|list|all|get|for|this|next|week|month|days?|\d+)\b/g, '')
+        .replace(/\b(?:action items|tasks?|activities|items|steps|work|upcoming)\b/g, '')
+        .replace(/\s+/g, ' ').trim();
+      console.log(`[NL] Early team extract: "${teamExtract}"`);
+      if (teamExtract) {
+        const teamResult = await this.handleTeamQuery(teamExtract);
+        if (teamResult) return teamResult;
+      }
+    }
+
     const stepId = this.extractStepId(text);
     if (stepId && text.replace(/\s/g, '').length <= stepId.length + 2) {
       return this.handleStepQuery(`status ${stepId}`);
