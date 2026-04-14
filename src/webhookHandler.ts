@@ -400,10 +400,20 @@ export class WebhookHandler {
     this.dependencyEngine.buildGraph(allSteps);
     const now = new Date();
     const cutoff = new Date(now.getTime() + days * 86400000);
+
+    // For "this week", include items from start of the week (Monday) through end of week
+    const startOfWeek = new Date(now);
+    const dayOfWeek = startOfWeek.getDay();
+    const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    startOfWeek.setDate(startOfWeek.getDate() + mondayOffset);
+    startOfWeek.setHours(0, 0, 0, 0);
+
+    const rangeStart = days <= 7 ? startOfWeek : now;
+
     const active = allSteps.filter(s => {
       if (s.corpStatus === 'Completed' || s.corpStatus === 'N/A') return false;
       const endDate = s.corpEndDate ? new Date(s.corpEndDate) : null;
-      return endDate && endDate >= now && endDate <= cutoff;
+      return endDate && endDate >= rangeStart && endDate <= cutoff;
     }).sort((a, b) => {
       const da = a.corpEndDate ? new Date(a.corpEndDate).getTime() : Infinity;
       const db = b.corpEndDate ? new Date(b.corpEndDate).getTime() : Infinity;
@@ -415,13 +425,13 @@ export class WebhookHandler {
       const card = buildStepListCard(`📅 Upcoming Activities — ${label} (${active.length} steps)`, active, 'Corp');
       return this.cardResponse(card);
     }
-    // Fallback: show all pending
+    // Fallback: show next 10 pending items only (not 20)
     const pending = allSteps.filter(s => s.corpStatus === 'Not Started' || s.corpStatus === 'In Progress')
       .sort((a, b) => {
         const da = a.corpEndDate ? new Date(a.corpEndDate).getTime() : Infinity;
         const db = b.corpEndDate ? new Date(b.corpEndDate).getTime() : Infinity;
         return da - db;
-      }).slice(0, 20);
+      }).slice(0, 10);
     if (pending.length > 0) {
       const card = buildStepListCard(`📅 Next Pending Activities (${pending.length} shown)`, pending, 'Corp');
       return this.cardResponse(card);
