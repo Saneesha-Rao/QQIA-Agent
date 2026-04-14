@@ -449,6 +449,52 @@ export class WebhookHandler {
     return this.cardResponse(card);
   }
 
+  /** Show a person's tasks filtered by upcoming date range */
+  private async handleOwnerUpcoming(name: string, days: number): Promise<WebhookResponse> {
+    const steps = await this.dataService.getStepsByOwner(name);
+    if (steps.length === 0) {
+      return this.textResponse(`No steps found for **${name}**.`);
+    }
+    const now = new Date();
+    const cutoff = new Date(now.getTime() + days * 86400000);
+    // For <= 7 days, use start of week (Monday)
+    const startOfWeek = new Date(now);
+    const dayOfWeek = startOfWeek.getDay();
+    const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    startOfWeek.setDate(startOfWeek.getDate() + mondayOffset);
+    startOfWeek.setHours(0, 0, 0, 0);
+    const rangeStart = days <= 7 ? startOfWeek : now;
+
+    const filtered = steps.filter(s => {
+      if (s.corpStatus === 'Completed' || s.corpStatus === 'N/A') return false;
+      const endDate = s.corpEndDate ? new Date(s.corpEndDate) : null;
+      const startDate = s.corpStartDate ? new Date(s.corpStartDate) : null;
+      // Include if end date or start date falls within range
+      return (endDate && endDate >= rangeStart && endDate <= cutoff) ||
+             (startDate && startDate >= rangeStart && startDate <= cutoff);
+    }).sort((a, b) => {
+      const da = a.corpEndDate ? new Date(a.corpEndDate).getTime() : Infinity;
+      const db = b.corpEndDate ? new Date(b.corpEndDate).getTime() : Infinity;
+      return da - db;
+    });
+
+    if (filtered.length === 0) {
+      const label = days <= 7 ? 'this week' : `next ${days} days`;
+      // Show all their pending tasks as fallback
+      const pending = steps.filter(s => s.corpStatus !== 'Completed' && s.corpStatus !== 'N/A');
+      if (pending.length > 0) {
+        const card = buildStepListCard(
+          `📅 ${name} — No items due ${label}, showing ${pending.length} pending`,
+          pending, 'Corp');
+        return this.cardResponse(card);
+      }
+      return this.textResponse(`No upcoming steps for **${name}** ${label}.`);
+    }
+    const label = days <= 7 ? 'This Week' : `Next ${days} Days`;
+    const card = buildStepListCard(`📅 ${name} — ${label} (${filtered.length} steps)`, filtered, 'Corp');
+    return this.cardResponse(card);
+  }
+
   private async handleSync(): Promise<WebhookResponse> {
     const result = await this.excelSync.fullSync();
     return this.textResponse(
@@ -555,33 +601,57 @@ export class WebhookHandler {
       else if (timeMatch[4]) lookAheadDays = parseInt(timeMatch[4]);
     }
 
-    // Detect team/group queries — "action items for MSC team", "activities for orchestration"
-    const teamMatch = text.match(/(?:action items|tasks?|activities|items|steps|work|upcoming|what(?:'s| is| are))\s+(?:for|of|from|by|in|under)\s+(?:the\s+)?(.+?)(?:\s+team|\s+group)?(?:\s+(?:this|next|that|due|need)|[?.]|$)/i)
-      || text.match(/(?:what(?:'s| is| are)\s+)?(?:the\s+)?(.+?)(?:\s+team|\s+group)'s\s+(?:action items|tasks?|activities|items|steps|work|upcoming)/i);
-    if (teamMatch) {
-      const candidate = teamMatch[1].replace(/\s+team$|\s+group$/i, '').trim();
-      const teamResult = await this.handleTeamQuery(candidate);
-      if (teamResult) return teamResult;
+    // Strip time phrases from text for clean person/team extraction
+    const timeStripped = text
+      .replace(/\b(?:for\s+)?(?:the\s+)?(?:this|next)\s+(?:\d+\s+)?(?:weeks?|months?|sprint|days?)\b/g, '')
+      .replace(/\b(?:for\s+)?(?:the\s+)?(?:next|coming|upcoming)\s+\d+\s+days?\b/g, '')
+      .replace(/\b(?:for\s+)?(?:in the next|within)\s+\d+\s+days?\b/g, '')
+      .replace(/\s+for\s*$/, '') // trailing "for" after time removal
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    // Detect person/team name — try multiple patterns on time-stripped text
+
+    let detectedName: string | null = null;
+
+    // Pattern 1: name BEFORE activity word (possessive, with or without apostrophe)
+    // "amit tiwaris activities" → "amit tiwari", "pragyas tasks" → "pragya"
+    const beforeActivity = timeStripped.match(
+      /(?:what\s+(?:are|is)\s+)?(.+?)(?:'s|s)\s+(?:action items|tasks?|activities|items|steps|work|upcoming)\b/i
+    );
+    if (beforeActivity) {
+      detectedName = beforeActivity[1].trim();
     }
 
-    // Detect mentioned person
-    let mentionedPerson: string | null = null;
-    const possessiveMatch = text.match(/(?:what(?:'s| is| are)\s+)?(\w[\w\s]*?)'s\s+(?:tasks?|activities|steps|items|work|upcoming)/i);
-    const forMatch = text.match(/(?:tasks?|activities|steps|work|upcoming)\s+(?:for|of|assigned to)\s+(\w[\w\s]*?)(?:\s+(?:this|next|that|due|need)|[?.]|$)/i);
-    const doesMatch = text.match(/what\s+(?:does|should|will|can)\s+(\w[\w\s]*?)\s+(?:need|have|do|start|complete|own)/i);
-    if (possessiveMatch) mentionedPerson = possessiveMatch[1].trim();
-    else if (forMatch) mentionedPerson = forMatch[1].trim();
-    else if (doesMatch) mentionedPerson = doesMatch[1].trim();
+    // Pattern 2: "activities/tasks for [name]" (on time-stripped text so "next week" is gone)
+    if (!detectedName) {
+      const afterFor = timeStripped.match(
+        /(?:action items|tasks?|activities|items|steps|work|upcoming)\s+(?:for|of|assigned to)\s+(?:the\s+)?(.+?)(?:\s+team|\s+group)?(?:[?.]|$)/i
+      );
+      if (afterFor) {
+        detectedName = afterFor[1].replace(/\s+team$|\s+group$/i, '').trim();
+      }
+    }
 
-    if (mentionedPerson && (text.includes('task') || text.includes('activities') || text.includes('step') ||
+    // Pattern 3: "what does [name] need/have/do"
+    if (!detectedName) {
+      const doesMatch = timeStripped.match(/what\s+(?:does|should|will|can)\s+(\w[\w\s]*?)\s+(?:need|have|do|start|complete|own)/i);
+      if (doesMatch) detectedName = doesMatch[1].trim();
+    }
+
+    if (detectedName && (text.includes('task') || text.includes('activities') || text.includes('step') ||
         text.includes('need') || text.includes('start') || text.includes('do') ||
         text.includes('due') || text.includes('upcoming') || text.includes('work') ||
-        text.includes('action items') || text.includes('items') ||
-        text.includes('this week') || text.includes('this month'))) {
-      // Check if mentioned person is actually a team name
-      const personTeamResult = await this.handleTeamQuery(mentionedPerson);
-      if (personTeamResult) return personTeamResult;
-      return this.handleOwnerTasks(`tasks for ${mentionedPerson}`);
+        text.includes('action item') || text.includes('items') ||
+        text.includes('this week') || text.includes('this month') || text.includes('next'))) {
+      // Check if name is a team/workstream first
+      const teamResult = await this.handleTeamQuery(detectedName);
+      if (teamResult) return teamResult;
+      // Otherwise treat as person — filter by time if time was mentioned
+      if (timeMatch) {
+        return this.handleOwnerUpcoming(detectedName, lookAheadDays);
+      }
+      return this.handleOwnerTasks(`tasks for ${detectedName}`);
     } else if (isPersonal && (text.includes('activities') || text.includes('task') || text.includes('upcoming') ||
         text.includes('need to') || text.includes('start') || text.includes('do') ||
         text.includes('due') || text.includes('pending') || text.includes('this week') ||
