@@ -367,9 +367,13 @@ async function main() {
   let excelDriveId = process.env.EXCEL_DRIVE_ID || '';
   let excelItemId = process.env.EXCEL_ITEM_ID || '';
 
+  console.log(`📡 Delegated Graph check: GRAPH_CLIENT_ID=${config.graph.clientId ? 'set' : 'empty'}, EXCEL_SHARING_URL=${sharingUrl ? 'set (' + sharingUrl.substring(0, 30) + '...)' : 'empty'}`);
+
   if (!config.graph.clientId && sharingUrl) {
+    console.log('📡 Attempting delegated Graph auth (device code flow)...');
     try {
       const authOk = await delegatedGraph.initialize();
+      console.log(`📡 Delegated Graph initialize result: ${authOk}`);
       if (authOk) {
         // Resolve sharing URL to get drive/item IDs
         if (!excelDriveId || !excelItemId) {
