@@ -20,13 +20,28 @@ async function main(workbook: ExcelScript.Workbook) {
   const data: BotData = await response.json();
   console.log(`📡 Fetched ${data.stepCount} steps from bot (${data.timestamp})`);
   
-  // Get the FY27_Rollover worksheet
-  let sheet = workbook.getWorksheet("FY27_Rollover");
+  // Find the right worksheet — try exact name, then partial match, then first sheet
+  const allSheets = workbook.getWorksheets();
+  console.log(`📋 Sheets found: ${allSheets.map(s => s.getName()).join(', ')}`);
+  
+  let sheet: ExcelScript.Worksheet | undefined;
+  sheet = workbook.getWorksheet("FY27_Rollover");
   if (!sheet) {
-    sheet = workbook.getWorksheets()[0];
-    console.log(`⚠️ FY27_Rollover sheet not found, using first sheet: ${sheet.getName()}`);
+    // Try partial match
+    sheet = allSheets.find(s => s.getName().toLowerCase().includes("rollover") || s.getName().toLowerCase().includes("fy27"));
   }
+  if (!sheet) {
+    sheet = allSheets[0];
+    console.log(`⚠️ Using first sheet: ${sheet.getName()}`);
+  } else {
+    console.log(`✅ Using sheet: ${sheet.getName()}`);
+  }
+
   const usedRange = sheet.getUsedRange();
+  if (!usedRange) {
+    console.log("❌ Sheet has no data (usedRange is null)");
+    return;
+  }
   const values = usedRange.getValues();
   
   let updated = 0;
