@@ -647,6 +647,32 @@ export class WebhookHandler {
       if (doesMatch) detectedName = doesMatch[1].trim();
     }
 
+    // Pattern 4: "what are [name] action items/tasks/activities" (no possessive, no "for")
+    // e.g. "what are MSC team action items", "what are orchestration activities"
+    if (!detectedName) {
+      const plainName = timeStripped.match(
+        /(?:what\s+(?:are|is)\s+|show\s+(?:me\s+)?)(.+?)\s+(?:action items|tasks?|activities|items|steps)\s*[?.]?$/i
+      );
+      if (plainName) {
+        detectedName = plainName[1].replace(/\s+team$|\s+group$/i, '').trim();
+      }
+    }
+
+    // Pattern 5: "[name] activities/tasks" at start (e.g. "MSC team activities", "orchestration tasks")
+    if (!detectedName) {
+      const startName = timeStripped.match(
+        /^(.+?)\s+(?:action items|tasks?|activities|items|steps)\s*[?.]?$/i
+      );
+      if (startName) {
+        detectedName = startName[1].replace(/\s+team$|\s+group$/i, '').trim();
+      }
+    }
+
+    // Strip "team"/"group" suffix from detected name for cleaner matching
+    if (detectedName) {
+      detectedName = detectedName.replace(/\s+team$|\s+group$/i, '').trim();
+    }
+
     if (detectedName && (text.includes('task') || text.includes('activities') || text.includes('step') ||
         text.includes('need') || text.includes('start') || text.includes('do') ||
         text.includes('due') || text.includes('upcoming') || text.includes('work') ||
