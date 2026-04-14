@@ -34,9 +34,19 @@ export class DelegatedGraphService {
   /** Initialize with device code flow — prints a URL + code for the user to sign in */
   async initialize(): Promise<boolean> {
     try {
+      // Clear any stale MSAL token cache to force a fresh device code prompt
+      const msalCacheDir = path.join(process.env.HOME || process.env.USERPROFILE || '/tmp', '.cache', 'azure');
+      if (fs.existsSync(msalCacheDir)) {
+        const cacheFiles = fs.readdirSync(msalCacheDir).filter(f => f.includes('msal') || f.includes('token'));
+        for (const cf of cacheFiles) {
+          try { fs.unlinkSync(path.join(msalCacheDir, cf)); } catch { /* ignore */ }
+        }
+        console.log(`🧹 Cleared ${cacheFiles.length} stale Azure token cache file(s)`);
+      }
+
       this.credential = new DeviceCodeCredential({
         clientId: DelegatedGraphService.CLIENT_ID,
-        tenantId: 'common',
+        tenantId: 'organizations',  // Microsoft corp accounts (not 'common' which includes personal)
         userPromptCallback: (info) => {
           console.log('\n' + '='.repeat(60));
           console.log('🔑 SIGN IN REQUIRED FOR EXCEL SYNC');
@@ -45,6 +55,17 @@ export class DelegatedGraphService {
           console.log('='.repeat(60) + '\n');
         },
       });
+
+      // Force a fresh token acquisition to trigger the device code prompt
+      console.log('📡 Requesting token (device code prompt should appear below)...');
+      const tokenResponse = await this.credential.getToken(
+        DelegatedGraphService.SCOPES.map(s => `https://graph.microsoft.com/${s}`)
+      );
+      if (!tokenResponse) {
+        console.warn('⚠️ No token received from device code flow');
+        return false;
+      }
+      console.log('✅ Token acquired successfully');
 
       const authProvider = new TokenCredentialAuthenticationProvider(this.credential, {
         scopes: DelegatedGraphService.SCOPES.map(s => `https://graph.microsoft.com/${s}`),
@@ -59,6 +80,9 @@ export class DelegatedGraphService {
       return true;
     } catch (err: any) {
       console.warn(`⚠️ Delegated Graph auth failed: ${err.message}`);
+      if (err.message.includes('invalid_grant')) {
+        console.warn('   💡 This usually means a stale cached token. Try: rm -rf ~/.cache/azure && npm start');
+      }
       this._isAuthenticated = false;
       return false;
     }
