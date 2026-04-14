@@ -170,9 +170,49 @@
     }
     .input-area button:hover { background: var(--primary-dark); }
     .input-area button:disabled { opacity: 0.5; cursor: not-allowed; }
+    /* Login overlay */
+    .login-overlay {
+      position: fixed; inset: 0;
+      background: linear-gradient(135deg, #6264a7 0%, #4b4d8a 100%);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 9999;
+    }
+    .login-box {
+      background: white; border-radius: 12px; padding: 40px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+      text-align: center; max-width: 400px; width: 90%;
+    }
+    .login-box h2 { font-size: 22px; margin-bottom: 4px; color: var(--primary); }
+    .login-box p { color: var(--text-muted); font-size: 14px; margin-bottom: 24px; }
+    .login-box input {
+      width: 100%; padding: 12px 16px; border: 2px solid var(--border);
+      border-radius: 8px; font-size: 16px; text-align: center;
+      letter-spacing: 2px; outline: none; margin-bottom: 16px;
+    }
+    .login-box input:focus { border-color: var(--primary); }
+    .login-box button {
+      width: 100%; padding: 12px; background: var(--primary);
+      color: white; border: none; border-radius: 8px;
+      font-size: 16px; font-weight: 600; cursor: pointer;
+    }
+    .login-box button:hover { background: var(--primary-dark); }
+    .login-box .error-msg { color: var(--danger); font-size: 13px; margin-top: 8px; display: none; }
+    .login-box .lock-icon { font-size: 48px; margin-bottom: 12px; }
   </style>
 </head>
 <body>
+  <!-- Login gate -->
+  <div class="login-overlay" id="loginOverlay" style="display:none">
+    <div class="login-box">
+      <div class="lock-icon">&#128274;</div>
+      <h2>QQIA Agent</h2>
+      <p>Microsoft internal access only.<br>Enter your team access code to continue.</p>
+      <input type="password" id="accessCodeInput" placeholder="Access code" autocomplete="off" />
+      <button onclick="submitAccessCode()">Sign In</button>
+      <div class="error-msg" id="loginError">Invalid access code. Please try again.</div>
+    </div>
+  </div>
+
   <div class="header">
     <div>&#128202;</div>
     <h1>QQIA Agent &#8212; FY27 Mint Rollover</h1>
@@ -206,6 +246,64 @@
   </div>
 
   <script>
+    // ---- Access Control ----
+    var appReady = false;
+
+    function checkAuth() {
+      fetch('/api/auth/check').then(function(r) { return r.json(); }).then(function(data) {
+        if (data.required && !data.authenticated) {
+          document.getElementById('loginOverlay').style.display = 'flex';
+          document.getElementById('accessCodeInput').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') submitAccessCode();
+          });
+        } else {
+          unlockApp();
+        }
+      }).catch(function() {
+        // Server unreachable — show UI anyway (dev mode)
+        unlockApp();
+      });
+    }
+
+    function submitAccessCode() {
+      var code = document.getElementById('accessCodeInput').value.trim();
+      if (!code) return;
+      fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: code })
+      }).then(function(r) {
+        if (r.ok) {
+          unlockApp();
+        } else {
+          document.getElementById('loginError').style.display = 'block';
+          document.getElementById('accessCodeInput').value = '';
+          document.getElementById('accessCodeInput').focus();
+        }
+      }).catch(function() {
+        document.getElementById('loginError').style.display = 'block';
+      });
+    }
+
+    function unlockApp() {
+      document.getElementById('loginOverlay').style.display = 'none';
+      appReady = true;
+    }
+
+    /** Wrap fetch to handle 401 → show login overlay */
+    var _origFetch = window.fetch;
+    window.fetch = function(url, opts) {
+      return _origFetch(url, opts).then(function(res) {
+        if (res.status === 401 && url !== '/api/auth/login' && url !== '/api/auth/check') {
+          document.getElementById('loginOverlay').style.display = 'flex';
+          throw new Error('Session expired. Please enter your access code.');
+        }
+        return res;
+      });
+    };
+
+    checkAuth();
+
     // ---- Sync Configuration ----
     var botApiUrl = window.location.origin + '/api/steps/json';
     var pendingSyncCount = 0;

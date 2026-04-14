@@ -76,11 +76,67 @@ const webhookHandler = new WebhookHandler(
 const server = restify.createServer();
 server.use(restify.plugins.bodyParser());
 
+// ---- Access Control ----
+const ACCESS_CODE = process.env.ACCESS_CODE || '';
+if (ACCESS_CODE) {
+  console.log('🔒 Access code protection enabled');
+}
+
+/** Check access code from header, query param, or cookie */
+function isAuthorized(req: any): boolean {
+  if (!ACCESS_CODE) return true; // No code configured = open access
+  const code = req.header('x-access-code')
+    || (req.query && req.query.code)
+    || parseCookie(req, 'qqia_access');
+  return code === ACCESS_CODE;
+}
+
+function parseCookie(req: any, name: string): string | null {
+  const cookies = req.header('cookie') || '';
+  const match = cookies.match(new RegExp('(?:^|;\\s*)' + name + '=([^;]*)'));
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+/** Middleware: protect API endpoints */
+function requireAccess(req: any, res: any, next: any) {
+  // Allow health check and login endpoint without auth
+  const openPaths = ['/api/health', '/api/auth/login', '/api/auth/check'];
+  if (!ACCESS_CODE || openPaths.indexOf(req.getPath()) >= 0) return next();
+  if (isAuthorized(req)) return next();
+  res.send(401, { error: 'Access code required' });
+  return next(false);
+}
+
+// Apply access control to all /api/ routes
+server.use((req: any, res: any, next: any) => {
+  if (req.getPath().startsWith('/api/')) {
+    return requireAccess(req, res, next);
+  }
+  return next();
+});
+
+// Auth endpoints
+server.post('/api/auth/login', (req: any, res: any, next: any) => {
+  const { code } = req.body || {};
+  if (code === ACCESS_CODE) {
+    res.setHeader('Set-Cookie', 'qqia_access=' + encodeURIComponent(code) + '; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800');
+    res.send(200, { success: true });
+  } else {
+    res.send(401, { error: 'Invalid access code' });
+  }
+  return next();
+});
+
+server.get('/api/auth/check', (req: any, res: any, next: any) => {
+  res.send(200, { authenticated: isAuthorized(req), required: !!ACCESS_CODE });
+  return next();
+});
+
 // CORS preflight for Office Script support
 server.opts('/api/steps/json', (req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-access-code');
   res.send(204);
   return next();
 });
@@ -116,7 +172,25 @@ server.get('/api/sync-script', (req, res, next) => {
   const filePath = path.join(publicDir, 'SyncFromBot.osts');
   fs.readFile(filePath, 'utf8', (err, data) => {
     if (err) { res.writeHead(404); res.end('Script not found'); }
-    else { res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end(data); }
+    else {
+      // Dynamically replace the bot URL with the actual host
+      const host = req.header('host') || 'localhost:3978';
+      const protocol = req.header('x-forwarded-proto') || 'https';
+      const actualUrl = protocol + '://' + host + '/api/steps/json';
+      let updated = data.replace(
+        /var botUrl = ".*?";/,
+        'var botUrl = "' + actualUrl + '";'
+      );
+      // Inject access code if configured
+      if (ACCESS_CODE) {
+        updated = updated.replace(
+          /var accessCode = ".*?";/,
+          'var accessCode = "' + ACCESS_CODE + '";'
+        );
+      }
+      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end(updated);
+    }
     next(false);
   });
 });

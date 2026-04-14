@@ -1,10 +1,12 @@
 async function main(workbook: ExcelScript.Workbook) {
   // QQIA Agent Sync Script
   var botUrl = "https://studious-space-dollop-97wv6vp7449wcpwqg-3978.app.github.dev/api/steps/json";
+  var accessCode = "REPLACE_WITH_ACCESS_CODE"; // Set your team access code here
   
+  var fetchUrl = botUrl + (accessCode ? "?code=" + accessCode : "");
   var response: Response;
   try {
-    response = await fetch(botUrl);
+    response = await fetch(fetchUrl);
   } catch (err) {
     console.log("Cannot reach the bot. Make sure the Codespace is running.");
     return;
