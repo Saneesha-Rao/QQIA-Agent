@@ -1,31 +1,28 @@
-import { DeviceCodeCredential, TokenCachePersistenceOptions } from '@azure/identity';
 import { Client } from '@microsoft/microsoft-graph-client';
-import { TokenCredentialAuthenticationProvider } from '@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials';
+import * as msal from '@azure/msal-node';
 import * as fs from 'fs';
 import * as path from 'path';
 
 /**
- * Delegated Graph auth using device code flow.
+ * Delegated Graph auth using device code flow via MSAL Node directly.
  * Uses Microsoft's built-in Azure CLI client ID — no app registration needed.
  * Authenticates as the user (delegated permissions) so it can read/write their OneDrive files.
- * 
- * Stores refresh token to disk so re-auth is only needed every ~90 days.
  */
 export class DelegatedGraphService {
   private client: Client | null = null;
-  private credential: DeviceCodeCredential | null = null;
-  private tokenCachePath: string;
+  private msalClient: msal.PublicClientApplication | null = null;
+  private accountInfo: msal.AccountInfo | null = null;
   private _isAuthenticated = false;
 
   // Microsoft's first-party Azure CLI client ID — public, no secret needed
   private static readonly CLIENT_ID = '04b07795-a71b-4346-935c-03553cd355bd';
-  private static readonly SCOPES = ['Files.ReadWrite', 'Sites.ReadWrite.All'];
+  private static readonly AUTHORITY = 'https://login.microsoftonline.com/organizations';
+  private static readonly SCOPES = [
+    'https://graph.microsoft.com/Files.ReadWrite',
+    'https://graph.microsoft.com/Sites.ReadWrite.All',
+  ];
 
-  constructor() {
-    const dataDir = path.resolve(__dirname, '..', '..', 'data');
-    if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
-    this.tokenCachePath = path.join(dataDir, '.token-cache.json');
-  }
+  constructor() {}
 
   get isAuthenticated(): boolean {
     return this._isAuthenticated;
@@ -34,57 +31,75 @@ export class DelegatedGraphService {
   /** Initialize with device code flow — prints a URL + code for the user to sign in */
   async initialize(): Promise<boolean> {
     try {
-      // Clear any stale MSAL token cache to force a fresh device code prompt
-      const msalCacheDir = path.join(process.env.HOME || process.env.USERPROFILE || '/tmp', '.cache', 'azure');
-      if (fs.existsSync(msalCacheDir)) {
-        const cacheFiles = fs.readdirSync(msalCacheDir).filter(f => f.includes('msal') || f.includes('token'));
-        for (const cf of cacheFiles) {
-          try { fs.unlinkSync(path.join(msalCacheDir, cf)); } catch { /* ignore */ }
-        }
-        console.log(`🧹 Cleared ${cacheFiles.length} stale Azure token cache file(s)`);
-      }
+      const msalConfig: msal.Configuration = {
+        auth: {
+          clientId: DelegatedGraphService.CLIENT_ID,
+          authority: DelegatedGraphService.AUTHORITY,
+        },
+      };
 
-      this.credential = new DeviceCodeCredential({
-        clientId: DelegatedGraphService.CLIENT_ID,
-        tenantId: 'organizations',  // Microsoft corp accounts (not 'common' which includes personal)
-        userPromptCallback: (info) => {
+      this.msalClient = new msal.PublicClientApplication(msalConfig);
+
+      console.log('📡 Starting device code flow...');
+      const deviceCodeRequest: msal.DeviceCodeRequest = {
+        scopes: DelegatedGraphService.SCOPES,
+        deviceCodeCallback: (response) => {
           console.log('\n' + '='.repeat(60));
           console.log('🔑 SIGN IN REQUIRED FOR EXCEL SYNC');
           console.log('='.repeat(60));
-          console.log(info.message);
+          console.log(`👉 Open: ${response.verificationUri}`);
+          console.log(`👉 Enter code: ${response.userCode}`);
           console.log('='.repeat(60) + '\n');
         },
-      });
+      };
 
-      // Force a fresh token acquisition to trigger the device code prompt
-      console.log('📡 Requesting token (device code prompt should appear below)...');
-      const tokenResponse = await this.credential.getToken(
-        DelegatedGraphService.SCOPES.map(s => `https://graph.microsoft.com/${s}`)
-      );
-      if (!tokenResponse) {
+      const authResult = await this.msalClient.acquireTokenByDeviceCode(deviceCodeRequest);
+      if (!authResult || !authResult.accessToken) {
         console.warn('⚠️ No token received from device code flow');
         return false;
       }
-      console.log('✅ Token acquired successfully');
 
-      const authProvider = new TokenCredentialAuthenticationProvider(this.credential, {
-        scopes: DelegatedGraphService.SCOPES.map(s => `https://graph.microsoft.com/${s}`),
+      this.accountInfo = authResult.account;
+      console.log(`✅ Token acquired for: ${authResult.account?.name || authResult.account?.username}`);
+
+      // Set up Graph client with custom auth provider that refreshes tokens
+      this.client = Client.init({
+        authProvider: async (done) => {
+          try {
+            const token = await this.getAccessToken();
+            done(null, token);
+          } catch (err: any) {
+            done(err, null);
+          }
+        },
       });
 
-      this.client = Client.initWithMiddleware({ authProvider });
-
-      // Test the connection by fetching user profile
+      // Test the connection
       const me = await this.client.api('/me').select('displayName,mail').get();
       console.log(`✅ Delegated Graph auth: signed in as ${me.displayName} (${me.mail})`);
       this._isAuthenticated = true;
       return true;
     } catch (err: any) {
       console.warn(`⚠️ Delegated Graph auth failed: ${err.message}`);
-      if (err.message.includes('invalid_grant')) {
-        console.warn('   💡 This usually means a stale cached token. Try: rm -rf ~/.cache/azure && npm start');
-      }
       this._isAuthenticated = false;
       return false;
+    }
+  }
+
+  /** Get a valid access token (refreshes silently if cached) */
+  private async getAccessToken(): Promise<string> {
+    if (!this.msalClient || !this.accountInfo) {
+      throw new Error('Not authenticated');
+    }
+    try {
+      const silentResult = await this.msalClient.acquireTokenSilent({
+        scopes: DelegatedGraphService.SCOPES,
+        account: this.accountInfo,
+      });
+      return silentResult.accessToken;
+    } catch {
+      // Silent refresh failed — need interactive re-auth
+      throw new Error('Token expired. Restart the server to re-authenticate.');
     }
   }
 
