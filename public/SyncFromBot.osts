@@ -1,5 +1,125 @@
 async function main(workbook: ExcelScript.Workbook) {
   // QQIA Agent Sync Script
+  var botUrl = "https://studious-space-dollop-97wv6vp7449wcpwqg-3978.app.github.dev/api/steps/json";
+  
+  var response: Response;
+  try {
+    response = await fetch(botUrl);
+  } catch (err) {
+    console.log("Cannot reach the bot. Make sure the Codespace is running.");
+    return;
+  }
+  if (!response.ok) {
+    console.log("Bot returned error: " + response.status);
+    return;
+  }
+  var data = await response.json() as BotData;
+  console.log("Fetched " + data.stepCount + " steps from bot");
+  
+  var allSheets = workbook.getWorksheets();
+  var sheetNames: string[] = [];
+  for (var i = 0; i < allSheets.length; i++) {
+    sheetNames.push(allSheets[i].getName());
+  }
+  console.log("Sheets found: " + sheetNames.join(", "));
+  
+  var sheet: ExcelScript.Worksheet | null = null;
+  
+  for (var i = 0; i < allSheets.length; i++) {
+    if (allSheets[i].getName() === "FY27_Rollover") {
+      sheet = allSheets[i];
+      break;
+    }
+  }
+  
+  if (!sheet) {
+    for (var i = 0; i < allSheets.length; i++) {
+      var name = allSheets[i].getName().toLowerCase();
+      if (name.indexOf("rollover") >= 0 || name.indexOf("fy27") >= 0) {
+        sheet = allSheets[i];
+        break;
+      }
+    }
+  }
+  
+  if (!sheet) {
+    sheet = allSheets[0];
+  }
+  console.log("Using sheet: " + sheet.getName());
+
+  var usedRange = sheet.getUsedRange();
+  if (!usedRange) {
+    console.log("Sheet has no data");
+    return;
+  }
+  var values = usedRange.getValues();
+  console.log("Sheet has " + values.length + " rows");
+  
+  var updated = 0;
+  var skipped = 0;
+  
+  var STEP_ID_COL = 0;
+  var CORP_STATUS_COL = 5;
+  var CORP_COMPLETED_COL = 6;
+  var FED_STATUS_COL = 9;
+  
+  var rowMap: { [key: string]: number } = {};
+  for (var r = 1; r < values.length; r++) {
+    var cellId = String(values[r][STEP_ID_COL]).trim();
+    if (cellId) {
+      rowMap[cellId] = r;
+    }
+  }
+
+  for (var si = 0; si < data.steps.length; si++) {
+    var step = data.steps[si];
+    var r = rowMap[step.stepId];
+    if (r === undefined) { skipped++; continue; }
+    var changed = false;
+    
+    var currentCorpStatus = String(values[r][CORP_STATUS_COL]).trim();
+    if (step.status && step.status !== currentCorpStatus) {
+      sheet.getCell(r, CORP_STATUS_COL).setValue(step.status);
+      changed = true;
+    }
+    
+    if (step.completedDate) {
+      var currentDate = String(values[r][CORP_COMPLETED_COL]).trim();
+      if (step.completedDate !== currentDate) {
+        sheet.getCell(r, CORP_COMPLETED_COL).setValue(step.completedDate);
+        changed = true;
+      }
+    }
+    
+    var currentFedStatus = String(values[r][FED_STATUS_COL]).trim();
+    if (step.fedStatus && step.fedStatus !== currentFedStatus) {
+      sheet.getCell(r, FED_STATUS_COL).setValue(step.fedStatus);
+      changed = true;
+    }
+    
+    if (changed) updated++;
+  }
+  
+  console.log("Sync complete: " + updated + " steps updated, " + skipped + " not found in sheet");
+}
+
+interface BotStep {
+  stepId: string;
+  status: string;
+  fedStatus: string;
+  completedDate: string | null;
+  lastModifiedBy: string | null;
+  lastModifiedDate: string | null;
+  description: string | null;
+}
+
+interface BotData {
+  timestamp: string;
+  stepCount: number;
+  steps: BotStep[];
+}
+async function main(workbook: ExcelScript.Workbook) {
+  // QQIA Agent Sync Script
   // Pulls latest status data from the bot and updates this Excel file
   
   // ⚠️ UPDATE THIS URL to match your Codespace
