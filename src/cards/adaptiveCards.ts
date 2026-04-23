@@ -193,8 +193,9 @@ export function buildStepListCard(title: string, steps: RolloverStep[], track: '
     const endDate = track === 'Corp' ? step.corpEndDate : step.fedEndDate;
     return {
       type: 'ColumnSet',
+      selectAction: { type: 'Action.Submit', data: { action: 'view_step', stepId: step.id } },
       columns: [
-        { type: 'Column', width: '35px', items: [{ type: 'TextBlock', text: step.id, weight: 'Bolder', size: 'Small' }] },
+        { type: 'Column', width: '35px', items: [{ type: 'TextBlock', text: step.id, weight: 'Bolder', size: 'Small', color: 'Accent' }] },
         { type: 'Column', width: 'stretch', items: [{ type: 'TextBlock', text: step.description, size: 'Small', wrap: true }] },
         { type: 'Column', width: '100px', items: [{ type: 'TextBlock', text: step.workstream || '-', size: 'Small', wrap: true, isSubtle: true }] },
         { type: 'Column', width: '75px', items: [{ type: 'TextBlock', text: `${statusEmoji(status)} ${status}`, size: 'Small' }] },

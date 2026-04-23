@@ -1,14 +1,15 @@
 async function main(workbook: ExcelScript.Workbook) {
   // QQIA Agent Sync Script
-  var botUrl = "https://studious-space-dollop-97wv6vp7449wcpwqg-3978.app.github.dev/api/steps/json";
-  var accessCode = "REPLACE_WITH_ACCESS_CODE"; // Set your team access code here
-  
+  // Pulls latest status data from the bot and updates this Excel file
+  var botUrl = "https://qqia-agent-462aq56aadxf2.azurewebsites.net/api/steps/json";
+  var accessCode = ""; // Set your team access code here if configured
+
   var fetchUrl = botUrl + (accessCode ? "?code=" + accessCode : "");
   var response: Response;
   try {
     response = await fetch(fetchUrl);
   } catch (err) {
-    console.log("Cannot reach the bot. Make sure the Codespace is running.");
+    console.log("Cannot reach the bot. Make sure the Azure App Service is running.");
     return;
   }
   if (!response.ok) {
@@ -17,23 +18,18 @@ async function main(workbook: ExcelScript.Workbook) {
   }
   var data = await response.json() as BotData;
   console.log("Fetched " + data.stepCount + " steps from bot");
-  
+
+  // Find the FY27_Rollover sheet
   var allSheets = workbook.getWorksheets();
-  var sheetNames: string[] = [];
-  for (var i = 0; i < allSheets.length; i++) {
-    sheetNames.push(allSheets[i].getName());
-  }
-  console.log("Sheets found: " + sheetNames.join(", "));
-  
   var sheet: ExcelScript.Worksheet | null = null;
-  
+
   for (var i = 0; i < allSheets.length; i++) {
     if (allSheets[i].getName() === "FY27_Rollover") {
       sheet = allSheets[i];
       break;
     }
   }
-  
+
   if (!sheet) {
     for (var i = 0; i < allSheets.length; i++) {
       var name = allSheets[i].getName().toLowerCase();
@@ -43,46 +39,37 @@ async function main(workbook: ExcelScript.Workbook) {
       }
     }
   }
-  
+
   if (!sheet) {
     sheet = allSheets[0];
   }
   console.log("Using sheet: " + sheet.getName());
 
-  // Use a specific range instead of getUsedRange() which returns full rows
-  // Columns: A=StepId, B=Workstream, ..., F=CorpStatus, G=CorpCompletedDate, ..., J=FedStatus
-  // Get row count from usedRange address
   var usedRange = sheet.getUsedRange();
   if (!usedRange) {
     console.log("Sheet has no data");
     return;
   }
-  var address = usedRange.getAddress();
-  console.log("UsedRange address: " + address);
-  
-  // Read columns A through S (19 columns) for all used rows  
+
   var lastRow = usedRange.getRowCount();
   console.log("Row count: " + lastRow);
   var dataRange = sheet.getRange("A1:S" + lastRow);
   var values = dataRange.getValues();
   if (!values || values.length === 0) {
-    console.log("No values in range A1:S" + lastRow);
+    console.log("No values in range");
     return;
   }
   console.log("Got " + values.length + " rows x " + values[0].length + " columns");
-  console.log("Row 1: " + String(values[0][0]) + " | " + String(values[0][1]));
-  if (values.length > 3) {
-    console.log("Row 4: " + String(values[3][0]) + " | " + String(values[3][1]) + " | Status: " + String(values[3][5]));
-  }
-  
+
   var updated = 0;
   var skipped = 0;
-  
+
   var STEP_ID_COL = 0;
   var CORP_STATUS_COL = 5;
   var CORP_COMPLETED_COL = 6;
   var FED_STATUS_COL = 9;
-  
+
+  // Build a map of step ID to row index
   var rowMap: { [key: string]: number } = {};
   for (var r = 1; r < values.length; r++) {
     var cellId = String(values[r][STEP_ID_COL]).trim();
@@ -91,18 +78,19 @@ async function main(workbook: ExcelScript.Workbook) {
     }
   }
 
+  // Update Excel cells from bot data
   for (var si = 0; si < data.steps.length; si++) {
     var step = data.steps[si];
     var r = rowMap[step.stepId];
     if (r === undefined) { skipped++; continue; }
     var changed = false;
-    
+
     var currentCorpStatus = String(values[r][CORP_STATUS_COL]).trim();
     if (step.status && step.status !== currentCorpStatus) {
       sheet.getCell(r, CORP_STATUS_COL).setValue(step.status);
       changed = true;
     }
-    
+
     if (step.completedDate) {
       var currentDate = String(values[r][CORP_COMPLETED_COL]).trim();
       if (step.completedDate !== currentDate) {
@@ -110,130 +98,17 @@ async function main(workbook: ExcelScript.Workbook) {
         changed = true;
       }
     }
-    
+
     var currentFedStatus = String(values[r][FED_STATUS_COL]).trim();
     if (step.fedStatus && step.fedStatus !== currentFedStatus) {
       sheet.getCell(r, FED_STATUS_COL).setValue(step.fedStatus);
       changed = true;
     }
-    
+
     if (changed) updated++;
   }
-  
+
   console.log("Sync complete: " + updated + " steps updated, " + skipped + " not found in sheet");
-}
-
-interface BotStep {
-  stepId: string;
-  status: string;
-  fedStatus: string;
-  completedDate: string | null;
-  lastModifiedBy: string | null;
-  lastModifiedDate: string | null;
-  description: string | null;
-}
-
-interface BotData {
-  timestamp: string;
-  stepCount: number;
-  steps: BotStep[];
-}
-async function main(workbook: ExcelScript.Workbook) {
-  // QQIA Agent Sync Script
-  // Pulls latest status data from the bot and updates this Excel file
-  
-  // ⚠️ UPDATE THIS URL to match your Codespace
-  const botUrl = "https://studious-space-dollop-97wv6vp7449wcpwqg-3978.app.github.dev/api/steps/json";
-  
-  // Fetch latest data from the bot
-  let response: Response;
-  try {
-    response = await fetch(botUrl);
-  } catch (err) {
-    console.log("❌ Cannot reach the bot. Make sure the Codespace is running and port 3978 is public.");
-    return;
-  }
-  if (!response.ok) {
-    console.log(`❌ Bot returned error ${response.status}. Is it running?`);
-    return;
-  }
-  const data: BotData = await response.json();
-  console.log(`📡 Fetched ${data.stepCount} steps from bot (${data.timestamp})`);
-  
-  // Find the right worksheet — try exact name, then partial match, then first sheet
-  const allSheets = workbook.getWorksheets();
-  console.log(`📋 Sheets found: ${allSheets.map(s => s.getName()).join(', ')}`);
-  
-  let sheet: ExcelScript.Worksheet | undefined;
-  sheet = workbook.getWorksheet("FY27_Rollover");
-  if (!sheet) {
-    // Try partial match
-    sheet = allSheets.find(s => s.getName().toLowerCase().includes("rollover") || s.getName().toLowerCase().includes("fy27"));
-  }
-  if (!sheet) {
-    sheet = allSheets[0];
-    console.log(`⚠️ Using first sheet: ${sheet.getName()}`);
-  } else {
-    console.log(`✅ Using sheet: ${sheet.getName()}`);
-  }
-
-  const usedRange = sheet.getUsedRange();
-  if (!usedRange) {
-    console.log("❌ Sheet has no data (usedRange is null)");
-    return;
-  }
-  const values = usedRange.getValues();
-  
-  let updated = 0;
-  let skipped = 0;
-  
-  // Column indices (0-based): 
-  // 0=Step ID, 5=Corp Status, 6=Corp Completed Date, 9=Fed Status
-  const STEP_ID_COL = 0;
-  const CORP_STATUS_COL = 5;
-  const CORP_COMPLETED_COL = 6;
-  const FED_STATUS_COL = 9;
-  
-  // Build a map of Step ID → row index for fast lookup
-  const rowMap = new Map<string, number>();
-  for (let r = 1; r < values.length; r++) {
-    const cellId = String(values[r][STEP_ID_COL]).trim();
-    if (cellId) rowMap.set(cellId, r);
-  }
-
-  for (const step of data.steps) {
-    const r = rowMap.get(step.stepId);
-    if (r === undefined) { skipped++; continue; }
-
-    let changed = false;
-
-    // Update Corp Status if different
-    const currentCorpStatus = String(values[r][CORP_STATUS_COL]).trim();
-    if (step.status && step.status !== currentCorpStatus) {
-      sheet.getCell(r, CORP_STATUS_COL).setValue(step.status);
-      changed = true;
-    }
-
-    // Update Corp Completed Date if set
-    if (step.completedDate) {
-      const currentDate = String(values[r][CORP_COMPLETED_COL]).trim();
-      if (step.completedDate !== currentDate) {
-        sheet.getCell(r, CORP_COMPLETED_COL).setValue(step.completedDate);
-        changed = true;
-      }
-    }
-
-    // Update Fed Status if different
-    const currentFedStatus = String(values[r][FED_STATUS_COL]).trim();
-    if (step.fedStatus && step.fedStatus !== currentFedStatus) {
-      sheet.getCell(r, FED_STATUS_COL).setValue(step.fedStatus);
-      changed = true;
-    }
-
-    if (changed) updated++;
-  }
-  
-  console.log(`✅ Sync complete: ${updated} steps updated, ${data.stepCount - updated - skipped} unchanged, ${skipped} not found in sheet`);
 }
 
 interface BotStep {

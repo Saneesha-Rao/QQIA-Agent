@@ -50,6 +50,21 @@ export class InMemoryDataService {
     );
   }
 
+  /** Search steps by keyword across description, engineeringDependent, owner, and workstream fields */
+  async searchSteps(keyword: string): Promise<RolloverStep[]> {
+    const lower = keyword.toLowerCase();
+    return [...this.steps.values()].filter(s =>
+      s.description.toLowerCase().includes(lower) ||
+      s.engineeringDependent.toLowerCase().includes(lower) ||
+      s.wwicPoc.toLowerCase().includes(lower) ||
+      s.fedPoc.toLowerCase().includes(lower) ||
+      s.engineeringDri.toLowerCase().includes(lower) ||
+      s.engineeringLead.toLowerCase().includes(lower) ||
+      s.workstream.toLowerCase().includes(lower) ||
+      s.referenceNotes.toLowerCase().includes(lower)
+    ).sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+  }
+
   async updateStepStatus(
     stepId: string,
     field: 'corpStatus' | 'fedStatus',
@@ -111,6 +126,13 @@ export class InMemoryDataService {
 
   async getAuditForStep(stepId: string): Promise<AuditEntry[]> {
     return this.audit.filter(a => a.stepId === stepId).reverse();
+  }
+
+  async getRecentChanges(since: string, limit: number = 50): Promise<AuditEntry[]> {
+    return this.audit
+      .filter(a => a.changedAt >= since)
+      .sort((a, b) => b.changedAt.localeCompare(a.changedAt))
+      .slice(0, limit);
   }
 
   // ---- Users ----

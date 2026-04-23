@@ -89,6 +89,15 @@ export class DataService {
     return resources;
   }
 
+  /** Search steps by keyword across description, engineeringDependent, owner, and workstream fields */
+  async searchSteps(keyword: string): Promise<RolloverStep[]> {
+    const query = `SELECT * FROM c WHERE CONTAINS(LOWER(c.description), @kw) OR CONTAINS(LOWER(c.engineeringDependent), @kw) OR CONTAINS(LOWER(c.wwicPoc), @kw) OR CONTAINS(LOWER(c.fedPoc), @kw) OR CONTAINS(LOWER(c.engineeringDri), @kw) OR CONTAINS(LOWER(c.engineeringLead), @kw) OR CONTAINS(LOWER(c.workstream), @kw) OR CONTAINS(LOWER(c.referenceNotes), @kw) ORDER BY c.id`;
+    const { resources } = await this.stepsContainer.items
+      .query({ query, parameters: [{ name: '@kw', value: keyword.toLowerCase() }] })
+      .fetchAll();
+    return resources;
+  }
+
   async updateStepStatus(
     stepId: string,
     field: 'corpStatus' | 'fedStatus',
@@ -157,6 +166,14 @@ export class DataService {
     const query = 'SELECT * FROM c WHERE c.stepId = @stepId ORDER BY c.changedAt DESC';
     const { resources } = await this.auditContainer.items
       .query({ query, parameters: [{ name: '@stepId', value: stepId }] })
+      .fetchAll();
+    return resources;
+  }
+
+  async getRecentChanges(since: string, limit: number = 50): Promise<AuditEntry[]> {
+    const query = 'SELECT TOP @limit * FROM c WHERE c.changedAt >= @since ORDER BY c.changedAt DESC';
+    const { resources } = await this.auditContainer.items
+      .query({ query, parameters: [{ name: '@since', value: since }, { name: '@limit', value: limit }] })
       .fetchAll();
     return resources;
   }
