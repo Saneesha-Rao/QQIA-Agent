@@ -150,7 +150,14 @@ export class QQIABot extends TeamsActivityHandler {
       } else if (text === 'my tasks' || text === 'my steps' || text === 'my items') {
         await this.handleMyTasks(context, userName);
       } else if (text.startsWith('status ') || text.startsWith('step ') || text.startsWith('show ')) {
-        await this.handleStepQuery(context, text);
+        // Check if it's a negative query before treating as step lookup
+        if (this.isNegativeQuery(text)) {
+          await this.handleNegativeQuery(context, text);
+        } else if (this.isDateRangeQuery(text)) {
+          await this.handleDateRangeQuery(context, text);
+        } else {
+          await this.handleStepQuery(context, text);
+        }
       } else if (text.startsWith('update ') || text.startsWith('mark ') || text.startsWith('complete ')) {
         await this.handleStatusUpdate(context, text, userName);
       } else if (text === 'blockers' || text === 'blocked' || text === 'show blockers') {
@@ -1502,6 +1509,7 @@ export class QQIABot extends TeamsActivityHandler {
         // Re-route suggested action button click as if user typed it
         if (data.text) {
           context.activity.text = data.text;
+          context.activity.value = undefined; // Clear to prevent re-entering action handler
           await this.handleMessage(context);
         }
         break;
@@ -1556,6 +1564,7 @@ export class QQIABot extends TeamsActivityHandler {
       case 'quick_action':
         if (data.text) {
           context.activity.text = data.text;
+          context.activity.value = undefined; // Clear to prevent re-entering action handler
           await this.handleMessage(context);
         }
         return { statusCode: 200, type: 'application/vnd.microsoft.activity.message', value: '' };
