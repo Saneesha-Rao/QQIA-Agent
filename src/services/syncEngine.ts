@@ -55,8 +55,7 @@ export class SyncEngine {
     this.graphService = graphService;
     this.dependencyEngine = dependencyEngine;
     this.notificationService = notificationService;
-    this.sourcePath = localFallbackPath ||
-      'C:\\Users\\salingal\\OneDrive - Microsoft\\Seller Incentives\\QQIA\\FY27_Mint_RolloverTimeline.xlsx';
+    this.sourcePath = localFallbackPath || process.env.EXCEL_LOCAL_PATH || '';
     this.localWorkingPath = path.join(process.cwd(), 'data', 'FY27_Mint_RolloverTimeline.xlsx');
   }
 

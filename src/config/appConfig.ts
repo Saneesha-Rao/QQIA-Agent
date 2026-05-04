@@ -24,7 +24,7 @@ export const config = {
     excelDriveId: process.env.EXCEL_DRIVE_ID || '',
     excelItemId: process.env.EXCEL_ITEM_ID || '',
     excelFilePath: process.env.EXCEL_FILE_PATH || '',
-    excelSharingUrl: process.env.EXCEL_SHARING_URL || 'https://microsoftapc-my.sharepoint.com/:x:/g/personal/salingal_microsoft_com/IQC6ExDXsSeQSJFRRucpbQ3UAc6CvGveaYkO5eEt_uJ1sxc?e=nPH6Yx',
+    excelSharingUrl: process.env.EXCEL_SHARING_URL || '',
   },
   powerAutomate: {
     readFlowUrl: process.env.PA_READ_FLOW_URL || '',
