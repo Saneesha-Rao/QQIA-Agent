@@ -302,6 +302,16 @@ server.post('/api/webhook', async (req, res) => {
 // Webhook for external automation status updates (ADO, pipelines, etc.)
 server.post('/api/automation/status', async (req, res) => {
   try {
+    // Require API key for automation writes
+    const AUTOMATION_KEY = process.env.AUTOMATION_API_KEY || '';
+    if (AUTOMATION_KEY) {
+      const provided = req.headers['x-api-key'] as string || '';
+      if (provided !== AUTOMATION_KEY) {
+        res.status(401).json({ error: 'Invalid or missing API key' });
+        return;
+      }
+    }
+
     const { stepId, status, track, source, notes } = req.body || {};
     if (!stepId || !status) {
       res.status(400).json({ error: 'stepId and status are required' });
@@ -349,7 +359,8 @@ server.post('/api/automation/status', async (req, res) => {
 
     res.json({ success: true, step: updated });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    console.error('Automation endpoint error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
