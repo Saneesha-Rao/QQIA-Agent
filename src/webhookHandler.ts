@@ -71,6 +71,9 @@ export class WebhookHandler {
   async processRequest(body: any, userName?: string): Promise<WebhookResponse> {
     // Teams outgoing webhook sends: { type, text, from: { name }, ... }
     let text = (body.text || '').trim();
+    if (text.length > 2000) {
+      return this.textResponse('Message too long (max 2000 characters). Please shorten your request.');
+    }
     const fromName = userName || body.from?.name || 'Unknown';
 
     // Handle card action button clicks (Action.Submit sends data in body.value)

@@ -1,4 +1,5 @@
 import express from 'express';
+import helmet from 'helmet';
 import {
   CloudAdapter,
   ConfigurationBotFrameworkAuthentication,
@@ -74,8 +75,19 @@ const webhookHandler = new WebhookHandler(
 
 // ---- HTTP Server ----
 const server = express();
-server.use(express.json());
-server.use(express.urlencoded({ extended: true }));
+server.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://adaptivecards.io"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"],
+      imgSrc: ["'self'", "data:", "https:"],
+      connectSrc: ["'self'"],
+    },
+  },
+}));
+server.use(express.json({ limit: '100kb' }));
+server.use(express.urlencoded({ extended: true, limit: '100kb' }));
 
 // ---- Access Control ----
 const ACCESS_CODE = process.env.ACCESS_CODE || '';
@@ -119,7 +131,8 @@ server.use((req: any, res: any, next: any) => {
 server.post('/api/auth/login', (req: any, res: any) => {
   const { code } = req.body || {};
   if (code === ACCESS_CODE) {
-    res.setHeader('Set-Cookie', 'qqia_access=' + encodeURIComponent(code) + '; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800');
+    const securePart = process.env.NODE_ENV === 'production' ? ' Secure;' : '';
+    res.setHeader('Set-Cookie', 'qqia_access=' + encodeURIComponent(code) + '; Path=/;' + securePart + ' HttpOnly; SameSite=Strict; Max-Age=604800');
     res.json({ success: true });
   } else {
     res.status(401).json({ error: 'Invalid access code' });
@@ -266,7 +279,8 @@ server.get('/api/audit', async (req, res) => {
       timestamp: new Date().toISOString(),
     });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    console.error('Audit endpoint error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -276,7 +290,8 @@ server.post('/api/sync', async (req, res) => {
     const result = await syncEngine.runSync();
     res.json(result);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    console.error('Sync endpoint error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -295,7 +310,7 @@ server.post('/api/webhook', async (req, res) => {
     res.json(response);
   } catch (err: any) {
     console.error('Webhook error:', err);
-    res.json({ type: 'message', text: `❌ Error: ${err.message}` });
+    res.json({ type: 'message', text: '❌ Something went wrong. Please try again.' });
   }
 });
 
