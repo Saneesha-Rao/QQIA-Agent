@@ -7,6 +7,7 @@ import { PowerAutomateSyncService } from './services/powerAutomateSyncService';
 import { ExcelComSyncService } from './services/excelComSyncService';
 import { NotificationService } from './services/notificationService';
 import { RolloverStep } from './models/types';
+import { AnalyticsService } from './services/analyticsService';
 import {
   buildOverallDashboardCard,
   buildStepDetailCard,
@@ -37,6 +38,7 @@ export class WebhookHandler {
   private paSyncService?: PowerAutomateSyncService;
   private comSync?: ExcelComSyncService;
   private hmacSecret?: string;
+  private analyticsService?: AnalyticsService;
 
   constructor(
     dataService: DataService | InMemoryDataService,
@@ -45,7 +47,8 @@ export class WebhookHandler {
     notificationService: NotificationService,
     paSyncService?: PowerAutomateSyncService,
     comSync?: ExcelComSyncService,
-    hmacSecret?: string
+    hmacSecret?: string,
+    analyticsService?: AnalyticsService
   ) {
     this.dataService = dataService;
     this.dependencyEngine = dependencyEngine;
@@ -54,6 +57,7 @@ export class WebhookHandler {
     this.paSyncService = paSyncService;
     this.comSync = comSync;
     this.hmacSecret = hmacSecret;
+    this.analyticsService = analyticsService;
   }
 
   /** Validate HMAC-SHA256 signature from Teams */
@@ -144,6 +148,10 @@ export class WebhookHandler {
         return this.handleBlockers();
       } else if (text === 'overdue' || text === 'show overdue') {
         return this.handleOverdue();
+      } else if (text === 'workstream health' || text === 'ws health' || text === 'health') {
+        return this.handleWorkstreamHealth(text);
+      } else if (text.startsWith('changes') || text === 'what changed' || text === 'what changed today') {
+        return this.handleChanges(text);
       } else if (text.startsWith('workstream ') || text.startsWith('ws ')) {
         return this.handleWorkstream(text);
       } else if (text === 'critical path' || text === 'cp') {
@@ -451,6 +459,24 @@ export class WebhookHandler {
     }
     const card = buildStepListCard(`📦 ${wsName}`, steps, 'Corp');
     return this.cardResponse(card);
+  }
+
+  private async handleWorkstreamHealth(text: string): Promise<WebhookResponse> {
+    if (!this.analyticsService) return this.textResponse('Analytics not available.');
+    const track = text.includes('fed') ? 'Fed' as const : 'Corp' as const;
+    const steps = await this.dataService.getAllSteps();
+    this.dependencyEngine.buildGraph(steps);
+    const health = this.analyticsService.getWorkstreamHealth(steps, this.dependencyEngine, track);
+    return this.textResponse(this.analyticsService.formatHealthForTeams(health));
+  }
+
+  private async handleChanges(text: string): Promise<WebhookResponse> {
+    if (!this.analyticsService) return this.textResponse('Analytics not available.');
+    const hoursMatch = text.match(/(\d+)\s*(?:hours?|hrs?|h)/);
+    const hours = hoursMatch ? parseInt(hoursMatch[1]) : 24;
+    const auditEntries = (this.dataService as any).getAllAudit ? await (this.dataService as any).getAllAudit(500) : [];
+    const changes = this.analyticsService.getRecentChanges(auditEntries, hours);
+    return this.textResponse(this.analyticsService.formatChangesForTeams(changes));
   }
 
   private async handleCriticalPath(): Promise<WebhookResponse> {

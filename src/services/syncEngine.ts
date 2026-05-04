@@ -415,4 +415,46 @@ export class SyncEngine {
     if (val === null || val === undefined) return '';
     return String(val).trim();
   }
+
+  /**
+   * Export all step data to a small staging Excel file in OneDrive.
+   * This file is NOT open by anyone, so OneDrive syncs it immediately.
+   * An Office Script in the main workbook reads this file via Automation Templates.
+   */
+  async exportStagingFile(): Promise<string> {
+    const steps = await this.dataService.getAllSteps();
+    if (steps.length === 0) return '';
+
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('BotData');
+
+    // Header row
+    ws.addRow(['StepId', 'CorpStatus', 'FedStatus', 'CorpCompletedDate', 'ReferenceNotes', 'LastModifiedSource', 'LastModified']);
+
+    // Data rows — export ALL steps so the Office Script can compare
+    for (const step of steps) {
+      ws.addRow([
+        step.id,
+        step.corpStatus || '',
+        step.fedStatus || '',
+        step.corpCompletedDate || '',
+        step.referenceNotes || '',
+        step.lastModifiedSource || '',
+        step.lastModified || '',
+      ]);
+    }
+
+    // Auto-width columns
+    ws.columns.forEach(col => { col.width = 20; });
+
+    // Write to OneDrive folder (same folder as the main file)
+    const stagingDir = path.dirname(this.sourcePath);
+    const stagingPath = stagingDir
+      ? path.join(stagingDir, 'qqia-bot-sync.xlsx')
+      : path.join(process.cwd(), 'data', 'qqia-bot-sync.xlsx');
+
+    await wb.xlsx.writeFile(stagingPath);
+    console.log(`[SyncEngine] Exported ${steps.length} steps to staging file: ${stagingPath}`);
+    return stagingPath;
+  }
 }

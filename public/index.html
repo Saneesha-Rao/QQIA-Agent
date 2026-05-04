@@ -257,6 +257,7 @@
       font-size: 12px; color: var(--text-muted); display: flex; justify-content: space-between;
     }
   </style>
+  <link rel="stylesheet" href="/analytics.css">
 </head>
 <body>
   <!-- Login gate -->
@@ -338,6 +339,17 @@
     <a id="excelLink" href="#" target="_blank" class="quick-btn" style="text-decoration:none;color:#217346;border-color:#217346;display:inline-flex;align-items:center;gap:4px">📗 Open Excel</a>
     <button class="quick-btn" onclick="openAuditLog()" style="color:var(--info);border-color:var(--info)">&#128220; Change Log</button>
   </div>
+
+  <!-- Tab navigation -->
+  <div style="display:flex;gap:0;border-bottom:2px solid #e5e7eb;margin:0 16px;">
+    <button id="tab-chat" class="quick-btn" onclick="switchTab('chat')" style="border:none;border-bottom:2px solid #2563eb;border-radius:0;margin-bottom:-2px;font-weight:600;color:#2563eb">💬 Chat</button>
+    <button id="tab-analytics" class="quick-btn" onclick="switchTab('analytics')" style="border:none;border-bottom:2px solid transparent;border-radius:0;margin-bottom:-2px;color:#6b7280">📊 Analytics</button>
+  </div>
+
+  <!-- Analytics view -->
+  <div id="analytics-container" style="display:none;padding:0 16px;overflow-y:auto;flex:1"></div>
+
+  <!-- Chat view -->
 
   <div class="messages" id="messages">
     <div class="message bot">
@@ -802,6 +814,40 @@
 
     function escHtml(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
     function escAttr(s) { return String(s || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+    // ---- Tab switching ----
+    function switchTab(tab) {
+      const chatView = document.getElementById('messages');
+      const inputArea = document.querySelector('.input-area');
+      const analyticsView = document.getElementById('analytics-container');
+      const tabChat = document.getElementById('tab-chat');
+      const tabAnalytics = document.getElementById('tab-analytics');
+      if (tab === 'analytics') {
+        chatView.style.display = 'none';
+        if (inputArea) inputArea.style.display = 'none';
+        analyticsView.style.display = 'block';
+        tabChat.style.borderBottomColor = 'transparent';
+        tabChat.style.color = '#6b7280';
+        tabChat.style.fontWeight = 'normal';
+        tabAnalytics.style.borderBottomColor = '#2563eb';
+        tabAnalytics.style.color = '#2563eb';
+        tabAnalytics.style.fontWeight = '600';
+        if (window.initAnalytics) window.initAnalytics();
+      } else {
+        chatView.style.display = '';
+        if (inputArea) inputArea.style.display = '';
+        analyticsView.style.display = 'none';
+        tabAnalytics.style.borderBottomColor = 'transparent';
+        tabAnalytics.style.color = '#6b7280';
+        tabAnalytics.style.fontWeight = 'normal';
+        tabChat.style.borderBottomColor = '#2563eb';
+        tabChat.style.color = '#2563eb';
+        tabChat.style.fontWeight = '600';
+      }
+    }
+    window.switchTab = switchTab;
   </script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+  <script src="/analytics.js"></script>
 </body>
 </html>

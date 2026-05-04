@@ -1,0 +1,273 @@
+/* QQIA Agent — Analytics Dashboard Styles */
+
+.analytics-dashboard {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px;
+  font-family: 'Segoe UI', -apple-system, sans-serif;
+}
+
+.analytics-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+  border-bottom: 2px solid #e5e7eb;
+  padding-bottom: 12px;
+}
+
+.analytics-header h2 {
+  margin: 0;
+  font-size: 1.5rem;
+  color: #1f2937;
+}
+
+.track-toggle {
+  display: flex;
+  gap: 4px;
+  background: #f3f4f6;
+  border-radius: 8px;
+  padding: 4px;
+}
+
+.track-toggle-btn {
+  padding: 6px 16px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 500;
+  background: transparent;
+  color: #6b7280;
+  transition: all 0.2s;
+}
+
+.track-toggle-btn.active {
+  background: #2563eb;
+  color: white;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+
+.analytics-section {
+  margin-bottom: 32px;
+}
+
+.analytics-section h3 {
+  font-size: 1.1rem;
+  color: #374151;
+  margin-bottom: 12px;
+}
+
+/* Health Cards */
+.health-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.health-card {
+  background: white;
+  border-radius: 8px;
+  padding: 16px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  transition: transform 0.2s;
+}
+
+.health-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+
+.health-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.health-emoji { font-size: 1.2rem; }
+.health-name { font-weight: 600; color: #1f2937; font-size: 0.95rem; }
+.health-pct { font-size: 2rem; font-weight: 700; color: #1f2937; margin-bottom: 4px; }
+
+.health-bar {
+  height: 6px;
+  background: #e5e7eb;
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+
+.health-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.5s ease;
+}
+
+.health-stats {
+  display: flex;
+  gap: 12px;
+  font-size: 0.8rem;
+  color: #6b7280;
+  margin-bottom: 4px;
+}
+
+.health-meta { font-size: 0.75rem; color: #9ca3af; }
+
+/* Burndown Chart */
+.chart-wrapper {
+  background: white;
+  border-radius: 8px;
+  padding: 16px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  height: 350px;
+  position: relative;
+}
+
+.chart-empty {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: #9ca3af;
+  text-align: center;
+  font-size: 0.9rem;
+}
+
+.hidden { display: none; }
+
+/* Gantt / Timeline */
+.gantt {
+  background: white;
+  border-radius: 8px;
+  padding: 16px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  overflow-x: auto;
+  min-width: 600px;
+}
+
+.gantt-header {
+  position: relative;
+  height: 30px;
+  border-bottom: 1px solid #e5e7eb;
+  margin-bottom: 8px;
+}
+
+.gantt-month {
+  position: absolute;
+  top: 0;
+  font-size: 0.7rem;
+  color: #9ca3af;
+  border-left: 1px dashed #e5e7eb;
+  padding-left: 4px;
+  height: 100%;
+}
+
+.gantt-today {
+  position: absolute;
+  top: 0;
+  height: 2000px;
+  width: 2px;
+  background: #ef4444;
+  opacity: 0.5;
+  z-index: 1;
+}
+
+.gantt-group-label {
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: #374151;
+  padding: 8px 0 4px;
+  border-top: 1px solid #f3f4f6;
+}
+
+.gantt-row {
+  display: flex;
+  align-items: center;
+  height: 24px;
+  margin-bottom: 2px;
+}
+
+.gantt-label {
+  width: 50px;
+  font-size: 0.7rem;
+  color: #6b7280;
+  text-align: right;
+  padding-right: 8px;
+  flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gantt-bar-area {
+  flex: 1;
+  position: relative;
+  height: 16px;
+}
+
+.gantt-bar {
+  position: absolute;
+  top: 2px;
+  height: 12px;
+  border-radius: 3px;
+  opacity: 0.85;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.gantt-bar:hover { opacity: 1; }
+
+.gantt-milestone {
+  position: absolute;
+  top: -2px;
+  color: #f59e0b;
+  font-size: 1rem;
+  transform: translateX(-50%);
+}
+
+/* Changes Feed */
+#changes-feed {
+  background: white;
+  border-radius: 8px;
+  padding: 16px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.change-date {
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: #374151;
+  padding: 8px 0 4px;
+  border-bottom: 1px solid #f3f4f6;
+  margin-bottom: 4px;
+}
+
+.change-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 0.85rem;
+  color: #4b5563;
+}
+
+.change-icon { font-size: 0.9rem; }
+.change-step { font-weight: 600; color: #2563eb; min-width: 40px; }
+.change-detail { flex: 1; }
+.change-meta { font-size: 0.75rem; color: #9ca3af; white-space: nowrap; }
+
+/* Status indicators */
+.loading { color: #9ca3af; text-align: center; padding: 20px; }
+.error { color: #ef4444; text-align: center; padding: 20px; }
+.empty { color: #9ca3af; text-align: center; padding: 20px; }
+
+/* Legend for timeline */
+.gantt::after {
+  content: '🟢 Completed  🔵 In Progress  🔴 Blocked  ⚪ Not Started  🔴 Today';
+  display: block;
+  font-size: 0.7rem;
+  color: #9ca3af;
+  text-align: center;
+  padding-top: 12px;
+  border-top: 1px solid #f3f4f6;
+  margin-top: 8px;
+}

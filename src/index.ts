@@ -20,6 +20,7 @@ import { DelegatedGraphService } from './services/delegatedGraphService';
 import { SyncEngine } from './services/syncEngine';
 import { ProactiveMessenger } from './services/proactiveMessenger';
 import { WebhookHandler } from './webhookHandler';
+import { AnalyticsService } from './services/analyticsService';
 import * as XLSX from 'xlsx';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -63,6 +64,7 @@ adapter.onTurnError = async (context: TurnContext, error: Error) => {
 // Initialize proactive messenger and sync engine (need adapter reference)
 const proactiveMessenger = new ProactiveMessenger(adapter, config.bot.appId, dataService as any, notificationService);
 const syncEngine = new SyncEngine(dataService as any, graphService, dependencyEngine, notificationService);
+const analyticsService = new AnalyticsService();
 
 // Create the bot with all services (pass PA sync and COM sync for SharePoint write-back)
 const bot = new QQIABot(dataService as any, dependencyEngine, excelSync, notificationService, paSyncService, comSync);
@@ -70,7 +72,7 @@ const bot = new QQIABot(dataService as any, dependencyEngine, excelSync, notific
 // Create webhook handler for Teams Outgoing Webhook (no AAD/Azure required)
 const webhookHandler = new WebhookHandler(
   dataService, dependencyEngine, excelSync, notificationService,
-  paSyncService, comSync, process.env.WEBHOOK_HMAC_SECRET
+  paSyncService, comSync, process.env.WEBHOOK_HMAC_SECRET, analyticsService
 );
 
 // ---- HTTP Server ----
@@ -159,10 +161,7 @@ server.get('/', (req, res) => {
 });
 
 // Serve static files from public/
-server.get('/msal-browser.min.js', (req, res) => {
-  const filePath = path.join(publicDir, 'msal-browser.min.js');
-  res.sendFile(filePath);
-});
+server.use(express.static(publicDir));
 
 // Serve the Office Script file
 server.get('/api/sync-script', (req, res) => {
@@ -284,14 +283,88 @@ server.get('/api/audit', async (req, res) => {
   }
 });
 
+// ---- Analytics API Endpoints ----
+
+// Burndown chart data
+server.get('/api/analytics/burndown', async (req, res) => {
+  try {
+    const track = (req.query.track as string || 'Corp') as 'Corp' | 'Fed';
+    const steps = await dataService.getAllSteps();
+    // Ensure today's snapshot exists
+    analyticsService.recordSnapshot(steps, track);
+    const auditEntries = (dataService as any).getAllAudit ? await (dataService as any).getAllAudit(1000) : [];
+    const burndown = analyticsService.getBurndown(track, auditEntries);
+    res.json({ track, data: burndown });
+  } catch (err: any) {
+    console.error('Burndown error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Workstream health
+server.get('/api/analytics/workstream-health', async (req, res) => {
+  try {
+    const track = (req.query.track as string || 'Corp') as 'Corp' | 'Fed';
+    const steps = await dataService.getAllSteps();
+    dependencyEngine.buildGraph(steps);
+    const health = analyticsService.getWorkstreamHealth(steps, dependencyEngine, track);
+    res.json({ track, workstreams: health });
+  } catch (err: any) {
+    console.error('Workstream health error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Timeline / Gantt data
+server.get('/api/analytics/timeline', async (req, res) => {
+  try {
+    const track = (req.query.track as string || 'Corp') as 'Corp' | 'Fed';
+    const steps = await dataService.getAllSteps();
+    const timeline = analyticsService.getTimeline(steps, track);
+    const milestones = await (dataService as any).getAllMilestones?.() || [];
+    res.json({ track, steps: timeline, milestones });
+  } catch (err: any) {
+    console.error('Timeline error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Recent changes feed
+server.get('/api/analytics/changes', async (req, res) => {
+  try {
+    const hours = Math.min(parseInt(req.query.hours as string) || 24, 168); // max 7 days
+    const auditEntries = (dataService as any).getAllAudit ? await (dataService as any).getAllAudit(1000) : [];
+    const changes = analyticsService.getRecentChanges(auditEntries, hours);
+    res.json({ hours, count: changes.length, changes });
+  } catch (err: any) {
+    console.error('Changes error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Manual sync trigger endpoint (webhook for Power Automate / Logic Apps)
 server.post('/api/sync', async (req, res) => {
   try {
     const result = await syncEngine.runSync();
+    // Auto-export staging file for Excel Online sync
+    try { await syncEngine.exportStagingFile(); } catch (e: any) {
+      console.warn('[Sync] Staging file export failed:', e.message);
+    }
     res.json(result);
   } catch (err: any) {
     console.error('Sync endpoint error:', err);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Export staging file for Excel Online Office Script sync
+server.post('/api/export-staging', async (req, res) => {
+  try {
+    const filePath = await syncEngine.exportStagingFile();
+    res.json({ success: true, filePath, timestamp: new Date().toISOString() });
+  } catch (err: any) {
+    console.error('Export staging error:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -370,6 +443,11 @@ server.post('/api/automation/status', async (req, res) => {
       }
     } catch (syncErr: any) {
       console.warn(`Automation update: Excel sync failed: ${syncErr.message}`);
+    }
+
+    // Export staging file for Excel Online sync
+    try { await syncEngine.exportStagingFile(); } catch (e: any) {
+      console.warn('Staging file export failed:', e.message);
     }
 
     res.json({ success: true, step: updated });
@@ -483,6 +561,11 @@ async function main() {
     if (!validation.valid) {
       console.warn(`⚠️ Cycles detected: ${validation.cycles.map(c => c.join('→')).join('; ')}`);
     }
+
+    // Seed today's analytics snapshot
+    analyticsService.recordSnapshot(allSteps, 'Corp');
+    analyticsService.recordSnapshot(allSteps, 'Fed');
+    console.log('📈 Analytics snapshot recorded');
   } catch (err: any) {
     console.warn(`⚠️ Excel seed failed: ${err.message}`);
   }
@@ -500,7 +583,8 @@ async function main() {
     console.log(`   Webhook:        POST /api/webhook  (Teams Outgoing Webhook)`);
     console.log(`   Health check:   GET  /api/health`);
     console.log(`   Manual sync:    POST /api/sync`);
-    console.log(`   Auto-update:    POST /api/automation/status\n`);
+    console.log(`   Auto-update:    POST /api/automation/status`);
+    console.log(`   Analytics:      GET  /api/analytics/*\n`);
   });
 }
 
