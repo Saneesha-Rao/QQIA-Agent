@@ -27,7 +27,7 @@ export interface RolloverStep {
   fy26FedEnd: string | null;
   lastModified: string;
   lastModifiedBy: string;
-  lastModifiedSource: 'bot' | 'excel' | 'automation' | 'webhook';
+  lastModifiedSource: 'bot' | 'excel' | 'automation' | 'webhook' | 'com_synced';
 }
 
 /** High-level milestone from HighLevelMilestones sheet */

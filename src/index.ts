@@ -1,4 +1,4 @@
-import * as restify from 'restify';
+import express from 'express';
 import {
   CloudAdapter,
   ConfigurationBotFrameworkAuthentication,
@@ -73,8 +73,9 @@ const webhookHandler = new WebhookHandler(
 );
 
 // ---- HTTP Server ----
-const server = restify.createServer();
-server.use(restify.plugins.bodyParser());
+const server = express();
+server.use(express.json());
+server.use(express.urlencoded({ extended: true }));
 
 // ---- Access Control ----
 const ACCESS_CODE = process.env.ACCESS_CODE || '';
@@ -85,14 +86,14 @@ if (ACCESS_CODE) {
 /** Check access code from header, query param, or cookie */
 function isAuthorized(req: any): boolean {
   if (!ACCESS_CODE) return true; // No code configured = open access
-  const code = req.header('x-access-code')
+  const code = req.get('x-access-code')
     || (req.query && req.query.code)
     || parseCookie(req, 'qqia_access');
   return code === ACCESS_CODE;
 }
 
 function parseCookie(req: any, name: string): string | null {
-  const cookies = req.header('cookie') || '';
+  const cookies = req.get('cookie') || '';
   const match = cookies.match(new RegExp('(?:^|;\\s*)' + name + '=([^;]*)'));
   return match ? decodeURIComponent(match[1]) : null;
 }
@@ -101,102 +102,81 @@ function parseCookie(req: any, name: string): string | null {
 function requireAccess(req: any, res: any, next: any) {
   // Allow health check and login endpoint without auth
   const openPaths = ['/api/health', '/api/auth/login', '/api/auth/check'];
-  if (!ACCESS_CODE || openPaths.indexOf(req.getPath()) >= 0) return next();
+  if (!ACCESS_CODE || openPaths.indexOf(req.path) >= 0) return next();
   if (isAuthorized(req)) return next();
-  res.send(401, { error: 'Access code required' });
-  return next(false);
+  res.status(401).json({ error: 'Access code required' });
 }
 
 // Apply access control to all /api/ routes
 server.use((req: any, res: any, next: any) => {
-  if (req.getPath().startsWith('/api/')) {
+  if (req.path.startsWith('/api/')) {
     return requireAccess(req, res, next);
   }
   return next();
 });
 
 // Auth endpoints
-server.post('/api/auth/login', (req: any, res: any, next: any) => {
+server.post('/api/auth/login', (req: any, res: any) => {
   const { code } = req.body || {};
   if (code === ACCESS_CODE) {
     res.setHeader('Set-Cookie', 'qqia_access=' + encodeURIComponent(code) + '; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800');
-    res.send(200, { success: true });
+    res.json({ success: true });
   } else {
-    res.send(401, { error: 'Invalid access code' });
+    res.status(401).json({ error: 'Invalid access code' });
   }
-  return next();
 });
 
-server.get('/api/auth/check', (req: any, res: any, next: any) => {
-  res.send(200, { authenticated: isAuthorized(req), required: !!ACCESS_CODE });
-  return next();
+server.get('/api/auth/check', (req: any, res: any) => {
+  res.json({ authenticated: isAuthorized(req), required: !!ACCESS_CODE });
 });
 
 // CORS preflight for Office Script support
-server.opts('/api/steps/json', (req, res, next) => {
+server.options('/api/steps/json', (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-access-code');
-  res.send(204);
-  return next();
+  res.sendStatus(204);
 });
 
 // Serve the web UI at root
 const publicDir = path.join(__dirname, '..', 'public');
-server.get('/', (req, res, next) => {
+server.get('/', (req, res) => {
   const indexPath = path.join(publicDir, 'index.html');
-  fs.readFile(indexPath, 'utf8', (err, data) => {
-    if (err) {
-      res.writeHead(404, { 'Content-Type': 'text/plain' });
-      res.end('Web UI not found');
-    } else {
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      res.end(data);
-    }
-    next(false);
-  });
+  res.sendFile(indexPath);
 });
 
 // Serve static files from public/
-server.get('/msal-browser.min.js', (req, res, next) => {
+server.get('/msal-browser.min.js', (req, res) => {
   const filePath = path.join(publicDir, 'msal-browser.min.js');
-  fs.readFile(filePath, (err, data) => {
-    if (err) { res.writeHead(404); res.end(); }
-    else { res.writeHead(200, { 'Content-Type': 'application/javascript' }); res.end(data); }
-    next(false);
-  });
+  res.sendFile(filePath);
 });
 
 // Serve the Office Script file
-server.get('/api/sync-script', (req, res, next) => {
+server.get('/api/sync-script', (req, res) => {
   const filePath = path.join(publicDir, 'SyncFromBot.osts');
   fs.readFile(filePath, 'utf8', (err, data) => {
-    if (err) { res.writeHead(404); res.end('Script not found'); }
-    else {
-      // Dynamically replace the bot URL with the actual host
-      const host = req.header('host') || 'localhost:3978';
-      const protocol = req.header('x-forwarded-proto') || 'https';
-      const actualUrl = protocol + '://' + host + '/api/steps/json';
-      let updated = data.replace(
-        /var botUrl = ".*?";/,
-        'var botUrl = "' + actualUrl + '";'
+    if (err) { res.status(404).send('Script not found'); return; }
+    // Dynamically replace the bot URL with the actual host
+    const host = req.get('host') || 'localhost:3978';
+    const protocol = req.get('x-forwarded-proto') || 'https';
+    const actualUrl = protocol + '://' + host + '/api/steps/json';
+    let updated = data.replace(
+      /var botUrl = ".*?";/,
+      'var botUrl = "' + actualUrl + '";'
+    );
+    // Inject access code if configured
+    if (ACCESS_CODE) {
+      updated = updated.replace(
+        /var accessCode = ".*?";/,
+        'var accessCode = "' + ACCESS_CODE + '";'
       );
-      // Inject access code if configured
-      if (ACCESS_CODE) {
-        updated = updated.replace(
-          /var accessCode = ".*?";/,
-          'var accessCode = "' + ACCESS_CODE + '";'
-        );
-      }
-      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-      res.end(updated);
     }
-    next(false);
+    res.type('text/plain').send(updated);
   });
 });
 
 server.post('/api/messages', async (req, res) => {
-  await adapter.process(req, res, async (context) => {
+  await adapter.process(req as any, res as any, async (context) => {
     // Save conversation reference for proactive messaging on every interaction
     if (context.activity.from) {
       proactiveMessenger.saveConversationReference(context.activity);
@@ -206,30 +186,23 @@ server.post('/api/messages', async (req, res) => {
 });
 
 // Download the updated Excel file
-server.get('/api/download/excel', (req, res, next) => {
+server.get('/api/download/excel', (req, res) => {
   const excelPath = path.join(__dirname, '..', 'data', 'FY27_Mint_RolloverTimeline.xlsx');
   if (!fs.existsSync(excelPath)) {
-    res.send(404, { error: 'Excel file not found' });
-    return next();
+    res.status(404).json({ error: 'Excel file not found' });
+    return;
   }
-  const stat = fs.statSync(excelPath);
-  res.writeHead(200, {
-    'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    'Content-Disposition': `attachment; filename="FY27_Mint_RolloverTimeline_${new Date().toISOString().split('T')[0]}.xlsx"`,
-    'Content-Length': stat.size,
-  });
-  fs.createReadStream(excelPath).pipe(res);
-  return next(false);
+  res.download(excelPath, `FY27_Mint_RolloverTimeline_${new Date().toISOString().split('T')[0]}.xlsx`);
 });
 
 // JSON API for Office Script sync - returns all steps with status data
-server.get('/api/steps/json', (req, res, next) => {
+server.get('/api/steps/json', (req, res) => {
   dataService.getAllSteps().then(steps => {
     // Add CORS headers so Office Scripts can call this endpoint
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-    res.send(200, {
+    res.json({
       timestamp: new Date().toISOString(),
       stepCount: steps.length,
       steps: steps.map(s => ({
@@ -239,13 +212,12 @@ server.get('/api/steps/json', (req, res, next) => {
         completedDate: s.corpCompletedDate || null,
         lastModifiedBy: s.lastModifiedBy || null,
         lastModifiedDate: s.lastModified || null,
+        lastModifiedSource: s.lastModifiedSource || null,
         description: s.description || null,
       })),
     });
-    return next();
   }).catch(() => {
-    res.send(500, { error: 'Failed to retrieve steps' });
-    return next();
+    res.status(500).json({ error: 'Failed to retrieve steps' });
   });
 });
 
@@ -257,22 +229,54 @@ server.get('/api/health', async (req, res) => {
     stepCount = steps.length;
   } catch { /* Cosmos unavailable */ }
 
-  res.send(200, {
+  res.json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
     version: '1.0.0',
     registeredUsers: proactiveMessenger.getRegisteredUserCount(),
     trackedSteps: stepCount,
+    excelUrl: config.graph.excelSharingUrl || '',
   });
+});
+
+// Audit log endpoint — admin view of all changes
+server.get('/api/audit', async (req, res) => {
+  try {
+    const stepId = req.query.stepId as string | undefined;
+    const source = req.query.source as string | undefined;
+    const changedBy = req.query.changedBy as string | undefined;
+    const limit = Math.min(parseInt(req.query.limit as string) || 200, 500);
+
+    let entries = await (dataService as any).getAllAudit(limit);
+
+    if (stepId) {
+      entries = entries.filter((e: any) => e.stepId === stepId);
+    }
+    if (source) {
+      entries = entries.filter((e: any) => e.source === source);
+    }
+    if (changedBy) {
+      const q = changedBy.toLowerCase();
+      entries = entries.filter((e: any) => e.changedBy.toLowerCase().includes(q));
+    }
+
+    res.json({
+      count: entries.length,
+      entries,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Manual sync trigger endpoint (webhook for Power Automate / Logic Apps)
 server.post('/api/sync', async (req, res) => {
   try {
     const result = await syncEngine.runSync();
-    res.send(200, result);
+    res.json(result);
   } catch (err: any) {
-    res.send(500, { error: err.message });
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -283,15 +287,15 @@ server.post('/api/webhook', async (req, res) => {
     const authHeader = req.headers['authorization'] as string || '';
     const rawBody = JSON.stringify(req.body);
     if (!webhookHandler.validateSignature(rawBody, authHeader)) {
-      res.send(401, { error: 'Invalid HMAC signature' });
+      res.status(401).json({ error: 'Invalid HMAC signature' });
       return;
     }
 
     const response = await webhookHandler.processRequest(req.body);
-    res.send(200, response);
+    res.json(response);
   } catch (err: any) {
     console.error('Webhook error:', err);
-    res.send(200, { type: 'message', text: `❌ Error: ${err.message}` });
+    res.json({ type: 'message', text: `❌ Error: ${err.message}` });
   }
 });
 
@@ -300,7 +304,7 @@ server.post('/api/automation/status', async (req, res) => {
   try {
     const { stepId, status, track, source, notes } = req.body || {};
     if (!stepId || !status) {
-      res.send(400, { error: 'stepId and status are required' });
+      res.status(400).json({ error: 'stepId and status are required' });
       return;
     }
 
@@ -310,7 +314,7 @@ server.post('/api/automation/status', async (req, res) => {
     );
 
     if (!updated) {
-      res.send(404, { error: `Step ${stepId} not found` });
+      res.status(404).json({ error: `Step ${stepId} not found` });
       return;
     }
 
@@ -343,9 +347,9 @@ server.post('/api/automation/status', async (req, res) => {
       console.warn(`Automation update: Excel sync failed: ${syncErr.message}`);
     }
 
-    res.send(200, { success: true, step: updated });
+    res.json({ success: true, step: updated });
   } catch (err: any) {
-    res.send(500, { error: err.message });
+    res.status(500).json({ error: err.message });
   }
 });
 

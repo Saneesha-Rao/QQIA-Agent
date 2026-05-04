@@ -79,7 +79,7 @@ export class ExcelComSyncService {
   async syncToExcel(): Promise<number> {
     const steps = await this.dataService.getAllSteps();
     const botUpdated = steps.filter(s =>
-      s.lastModifiedSource === 'bot' || s.lastModifiedSource === 'automation'
+      s.lastModifiedSource === 'bot' || s.lastModifiedSource === 'automation' || s.lastModifiedSource === 'webhook'
     );
 
     if (botUpdated.length === 0) return 0;
@@ -97,7 +97,9 @@ export class ExcelComSyncService {
         );
         if (success) {
           successCount++;
-          step.lastModifiedSource = 'excel';
+          // Mark as 'com_synced' — NOT 'excel' — so SyncEngine won't revert
+          // the change when it reads the (potentially stale) file
+          step.lastModifiedSource = 'com_synced';
           await this.dataService.upsertStep(step);
         }
       } catch (err: any) {

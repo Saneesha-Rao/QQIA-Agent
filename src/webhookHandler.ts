@@ -95,7 +95,37 @@ export class WebhookHandler {
                .replace(/\bactivites\b/g, 'activities').replace(/\bactivitys\b/g, 'activities')
                .replace(/\bworksteam\b/g, 'workstream').replace(/\bworkstrem\b/g, 'workstream');
 
+    // Synonym expansion (mirrors QQIABot)
+    text = text.replace(/\bfinished\b/g, 'completed').replace(/\bfinish\b/g, 'complete')
+               .replace(/\bstuck\b/g, 'blocked').replace(/\bhold\b/g, 'blocked').replace(/\bon hold\b/g, 'blocked')
+               .replace(/\bpending\b/g, 'not started').replace(/\bnot begun\b/g, 'not started').replace(/\bwaiting\b/g, 'not started')
+               .replace(/\bin-progress\b/g, 'in progress').replace(/\bstarted\b/g, 'in progress')
+               .replace(/\bunderway\b/g, 'in progress').replace(/\bongoing\b/g, 'in progress')
+               .replace(/\bassigned to\b/g, 'owner').replace(/\bowned by\b/g, 'owner')
+               .replace(/\bdelayed\b/g, 'overdue').replace(/\bpast due\b/g, 'overdue').replace(/\bslipped\b/g, 'overdue')
+               .replace(/\bdeps\b/g, 'dependencies').replace(/\bprereqs?\b/g, 'dependencies').replace(/\bprerequisites?\b/g, 'dependencies')
+               .replace(/\btimeline\b/g, 'upcoming').replace(/\bschedule\b/g, 'upcoming').replace(/\bcalendar\b/g, 'upcoming')
+               .replace(/\bprogress report\b/g, 'summary').replace(/\bstatus report\b/g, 'summary');
+
+    // Fuzzy command matching (first word)
+    const firstWord = text.split(' ')[0];
+    const fuzzyTarget = this.fuzzyMatchCommand(firstWord);
+    if (fuzzyTarget && fuzzyTarget !== firstWord) {
+      text = fuzzyTarget + text.slice(firstWord.length);
+    }
+
     try {
+      // Greetings & chitchat
+      if (/^(hi|hello|hey|howdy|good morning|good afternoon|good evening|yo)\b/.test(text)) {
+        return this.textResponse(`👋 Hi ${fromName}! Type **help** to see what I can do, or just ask me about FY27 rollover.`);
+      }
+      if (/^(thanks|thank you|thx|ty|cheers|appreciate it)\b/.test(text)) {
+        return this.textResponse(`You're welcome! Let me know if you need anything else. 😊`);
+      }
+      if (/^(bye|goodbye|see you|later|cya|good night)\b/.test(text)) {
+        return this.textResponse(`See you later, ${fromName}! 👋`);
+      }
+
       // Intent routing (mirrors QQIABot.handleMessage)
       if (text === 'help' || text === '?') {
         return this.handleHelp();
@@ -177,6 +207,57 @@ export class WebhookHandler {
     return match ? match[1].toUpperCase() : null;
   }
 
+  /** Extract ALL step IDs from text for batch operations (e.g., "1.A, 1.B, and 1.C") */
+  private extractAllStepIds(text: string): string[] {
+    const ids = new Set<string>();
+    const dotPattern = /\b(\d+)\s*\.\s*(\w+(?:\s*\.\s*\d+)?)\b/g;
+    let m: RegExpExecArray | null;
+    while ((m = dotPattern.exec(text)) !== null) {
+      ids.add((m[1] + '.' + m[2]).replace(/\s/g, '').toUpperCase());
+    }
+    const shortPattern = /\b(\d+)([A-Za-z])\b/g;
+    while ((m = shortPattern.exec(text)) !== null) {
+      const id = m[1] + '.' + m[2].toUpperCase();
+      if (!ids.has(id)) ids.add(id);
+    }
+    return Array.from(ids);
+  }
+
+  // ---- Fuzzy matching ----
+
+  private static KNOWN_COMMANDS = [
+    'help', 'dashboard', 'status', 'update', 'mark', 'complete', 'blockers',
+    'blocked', 'overdue', 'workstream', 'summary', 'upcoming', 'sync', 'refresh',
+    'note', 'tasks', 'dependencies', 'critical', 'show', 'step', 'owner', 'fed',
+  ];
+
+  private static levenshtein(a: string, b: string): number {
+    const m = a.length, n = b.length;
+    const dp = Array.from({ length: m + 1 }, (_, i) =>
+      Array.from({ length: n + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0))
+    );
+    for (let i = 1; i <= m; i++) {
+      for (let j = 1; j <= n; j++) {
+        dp[i][j] = a[i - 1] === b[j - 1]
+          ? dp[i - 1][j - 1]
+          : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+      }
+    }
+    return dp[m][n];
+  }
+
+  private fuzzyMatchCommand(word: string): string | null {
+    if (word.length < 3) return null;
+    let best: string | null = null;
+    let bestDist = 3;
+    for (const cmd of WebhookHandler.KNOWN_COMMANDS) {
+      const dist = WebhookHandler.levenshtein(word, cmd);
+      if (dist === 0) return word; // Exact match
+      if (dist < bestDist) { bestDist = dist; best = cmd; }
+    }
+    return best;
+  }
+
   // ---- Intent Handlers ----
 
   private handleHelp(): WebhookResponse {
@@ -242,8 +323,8 @@ export class WebhookHandler {
   }
 
   private async handleStatusUpdate(text: string, userName: string): Promise<WebhookResponse> {
-    const stepId = this.extractStepId(text);
-    if (!stepId) {
+    const allIds = this.extractAllStepIds(text);
+    if (allIds.length === 0) {
       return this.textResponse('Please provide a step ID, e.g., **update 1.A completed**');
     }
 
@@ -263,12 +344,51 @@ export class WebhookHandler {
     const field = isFed ? 'fedStatus' : 'corpStatus';
     const track = isFed ? 'Fed' : 'Corp';
 
-    const updated = await this.dataService.updateStepStatus(stepId, field as any, newStatus, userName, 'webhook');
-    if (!updated) {
-      return this.textResponse(`Step **${stepId}** not found.`);
+    // Single step update
+    if (allIds.length === 1) {
+      const stepId = allIds[0];
+      const updated = await this.dataService.updateStepStatus(stepId, field as any, newStatus, userName, 'webhook');
+      if (!updated) {
+        return this.textResponse(`Step **${stepId}** not found.`);
+      }
+
+      let syncMsg = '';
+      try {
+        if (this.comSync?.isAvailable) {
+          await this.comSync.syncToExcel();
+        } else if (this.paSyncService?.isConfigured) {
+          await this.paSyncService.syncToExcel();
+        } else {
+          await this.excelSync.syncToExcel();
+        }
+        syncMsg = `\n📊 Excel file updated.`;
+      } catch {
+        syncMsg = `\n⚠️ Excel sync pending — will retry on next scheduled sync.`;
+      }
+
+      let unblockMsg = '';
+      if (newStatus === 'Completed') {
+        const notifications = await this.notificationService.notifyPredecessorComplete(stepId, track as any);
+        if (notifications.length > 0) {
+          unblockMsg = `\n🔓 ${notifications.length} step(s) are now unblocked: ${notifications.map(n => n.steps[0]?.id).join(', ')}`;
+        }
+      }
+
+      return this.textResponse(
+        `✅ Step **${stepId}** ${track} status updated to **${newStatus}** by ${userName}.` +
+        (newStatus === 'Completed' ? `\nCompleted date set to ${new Date().toISOString().split('T')[0]}.` : '') +
+        syncMsg + unblockMsg
+      );
     }
 
-    // Sync to Excel
+    // Batch update — multiple step IDs
+    const succeeded: string[] = [];
+    const failed: string[] = [];
+    for (const sid of allIds) {
+      const ok = await this.dataService.updateStepStatus(sid, field as any, newStatus, userName, 'webhook');
+      if (ok) { succeeded.push(sid); } else { failed.push(sid); }
+    }
+
     let syncMsg = '';
     try {
       if (this.comSync?.isAvailable) {
@@ -283,20 +403,13 @@ export class WebhookHandler {
       syncMsg = `\n⚠️ Excel sync pending — will retry on next scheduled sync.`;
     }
 
-    // Trigger dependency notifications if completed
-    let unblockMsg = '';
-    if (newStatus === 'Completed') {
-      const notifications = await this.notificationService.notifyPredecessorComplete(stepId, track as any);
-      if (notifications.length > 0) {
-        unblockMsg = `\n🔓 ${notifications.length} step(s) are now unblocked: ${notifications.map(n => n.steps[0]?.id).join(', ')}`;
-      }
-    }
+    let msg = `✅ **Batch update**: ${succeeded.length} step(s) set to **${newStatus}** (${track}) by ${userName}.`;
+    if (succeeded.length > 0) msg += `\n✔️ Updated: ${succeeded.join(', ')}`;
+    if (failed.length > 0) msg += `\n⚠️ Not found: ${failed.join(', ')}`;
+    if (newStatus === 'Completed') msg += `\nCompleted date set to ${new Date().toISOString().split('T')[0]}.`;
+    msg += syncMsg;
 
-    return this.textResponse(
-      `✅ Step **${stepId}** ${track} status updated to **${newStatus}** by ${userName}.` +
-      (newStatus === 'Completed' ? `\nCompleted date set to ${new Date().toISOString().split('T')[0]}.` : '') +
-      syncMsg + unblockMsg
-    );
+    return this.textResponse(msg);
   }
 
   private async handleBlockers(): Promise<WebhookResponse> {
@@ -599,18 +712,39 @@ export class WebhookHandler {
       return this.handleStepQuery(`status ${stepId}`);
     }
     // Handle updates BEFORE queries — "change status of 15.B to completed" has both "status of" and "completed"
-    if (stepId && (text.includes('change') || text.includes(' to ') || text.includes('completed') || text.includes('done') ||
+    const allStepIds = this.extractAllStepIds(text);
+    const hasUpdateIntent = text.includes('change') || text.includes(' to ') || text.includes('completed') || text.includes('done') ||
         text.includes('in progress') || text.includes('blocked') || text.includes('complete') ||
-        text.includes('mark') || text.includes('set'))) {
-      // Extract the target status
+        text.includes('mark') || text.includes('set');
+    if (allStepIds.length > 0 && hasUpdateIntent) {
       let newStatus = 'Completed';
       if (text.includes('in progress') || text.includes('in-progress') || text.includes('started')) newStatus = 'In Progress';
       else if (text.includes('blocked') || text.includes('block')) newStatus = 'Blocked';
       else if (text.includes('not started') || text.includes('reset')) newStatus = 'Not Started';
       const field = text.includes('fed') ? 'fedStatus' : 'corpStatus';
-      const step = await this.dataService.updateStepStatus(stepId, field as any, newStatus, userName, 'webhook');
-      if (!step) return this.textResponse(`Step **${stepId}** not found.`);
-      return this.textResponse(`✅ Step **${stepId}** ${field === 'fedStatus' ? '(Fed)' : '(Corp)'} updated to **${newStatus}** by ${userName}.`);
+      const track = field === 'fedStatus' ? 'Fed' : 'Corp';
+
+      if (allStepIds.length === 1) {
+        const sid = allStepIds[0];
+        const step = await this.dataService.updateStepStatus(sid, field as any, newStatus, userName, 'webhook');
+        if (!step) return this.textResponse(`Step **${sid}** not found.`);
+        let msg = `✅ Step **${sid}** (${track}) updated to **${newStatus}** by ${userName}.`;
+        if (newStatus === 'Completed') msg += `\nCompleted date set to ${new Date().toISOString().split('T')[0]}.`;
+        return this.textResponse(msg);
+      }
+
+      // Batch update
+      const succeeded: string[] = [];
+      const failed: string[] = [];
+      for (const sid of allStepIds) {
+        const ok = await this.dataService.updateStepStatus(sid, field as any, newStatus, userName, 'webhook');
+        if (ok) { succeeded.push(sid); } else { failed.push(sid); }
+      }
+      let msg = `✅ **Batch update**: ${succeeded.length} step(s) set to **${newStatus}** (${track}) by ${userName}.`;
+      if (succeeded.length > 0) msg += `\n✔️ Updated: ${succeeded.join(', ')}`;
+      if (failed.length > 0) msg += `\n⚠️ Not found: ${failed.join(', ')}`;
+      if (newStatus === 'Completed') msg += `\nCompleted date set to ${new Date().toISOString().split('T')[0]}.`;
+      return this.textResponse(msg);
     }
     // Handle natural language status queries like "what is the status of step 1.A"
     if (stepId && (text.includes('status of') || text.includes('what is') || text.includes('what\'s') ||
@@ -620,6 +754,90 @@ export class WebhookHandler {
     }
 
     const isPersonal = /\b(i |i'[a-z]|my |me |mine)\b/.test(text) || text.startsWith('do i ') || text.startsWith('what do i');
+
+    // ---- Status + time-range queries (e.g., "what was completed last month", "what's in progress this week") ----
+    const statusFilterMatch = text.match(/\b(completed|in progress|not started|blocked|overdue)\b/);
+    const lastTimeMatch = text.match(/\b(last|past|previous)\s*(week|month|quarter|\d+\s*days?)\b/);
+    const thisTimeMatch = text.match(/\b(this)\s*(week|month)\b/);
+    if (statusFilterMatch) {
+      const targetStatus = statusFilterMatch[1] === 'completed' ? 'Completed'
+        : statusFilterMatch[1] === 'in progress' ? 'In Progress'
+        : statusFilterMatch[1] === 'not started' ? 'Not Started'
+        : statusFilterMatch[1] === 'blocked' ? 'Blocked'
+        : null;
+
+      const allSteps = await this.dataService.getAllSteps();
+      let filtered = targetStatus
+        ? allSteps.filter(s => s.corpStatus === targetStatus || s.fedStatus === targetStatus)
+        : allSteps;
+
+      // Apply time range filter
+      const now = new Date();
+      let rangeStart: Date | null = null;
+      let rangeEnd: Date | null = null;
+      let rangeLabel = '';
+
+      if (lastTimeMatch) {
+        const unit = lastTimeMatch[2];
+        if (unit === 'week') {
+          rangeStart = new Date(now.getTime() - 7 * 86400000);
+          rangeEnd = now;
+          rangeLabel = 'Last Week';
+        } else if (unit === 'month') {
+          rangeStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+          rangeEnd = new Date(now.getFullYear(), now.getMonth(), 1);
+          rangeLabel = 'Last Month';
+        } else if (unit === 'quarter') {
+          rangeStart = new Date(now.getTime() - 90 * 86400000);
+          rangeEnd = now;
+          rangeLabel = 'Last Quarter';
+        } else {
+          const daysNum = parseInt(unit);
+          if (daysNum) {
+            rangeStart = new Date(now.getTime() - daysNum * 86400000);
+            rangeEnd = now;
+            rangeLabel = `Last ${daysNum} Days`;
+          }
+        }
+      } else if (thisTimeMatch) {
+        const unit = thisTimeMatch[2];
+        if (unit === 'week') {
+          const dayOfWeek = now.getDay();
+          rangeStart = new Date(now.getTime() - dayOfWeek * 86400000);
+          rangeEnd = new Date(rangeStart.getTime() + 7 * 86400000);
+          rangeLabel = 'This Week';
+        } else if (unit === 'month') {
+          rangeStart = new Date(now.getFullYear(), now.getMonth(), 1);
+          rangeEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+          rangeLabel = 'This Month';
+        }
+      }
+
+      if (rangeStart && rangeEnd) {
+        const rStart = rangeStart.toISOString();
+        const rEnd = rangeEnd.toISOString();
+        if (targetStatus === 'Completed') {
+          // Filter by completed date
+          filtered = filtered.filter(s => {
+            const d = s.corpCompletedDate || s.lastModified;
+            return d && d >= rStart && d < rEnd;
+          });
+        } else {
+          // Filter by due date
+          filtered = filtered.filter(s => {
+            const d = s.corpEndDate;
+            return d && d >= rStart && d < rEnd;
+          });
+        }
+      }
+
+      const title = `📋 ${targetStatus || 'All'} Steps${rangeLabel ? ' — ' + rangeLabel : ''} (${filtered.length})`;
+      if (filtered.length === 0) {
+        return this.textResponse(`No ${(targetStatus || '').toLowerCase()} steps found${rangeLabel ? ' for ' + rangeLabel.toLowerCase() : ''}.`);
+      }
+      const card = buildStepListCard(title, filtered.slice(0, 25), 'Corp');
+      return this.cardResponse(card);
+    }
 
     // Detect time-window keywords
     const timeMatch = text.match(/(?:this|next)\s+(\d+\s+)?(week|month|sprint)|(?:next|coming|upcoming)\s+(\d+)\s+days?|(?:in the next|within)\s+(\d+)\s+days?/i);
@@ -737,18 +955,64 @@ export class WebhookHandler {
       // If we found a step ID anywhere in the text, show its status
       return this.handleStepQuery(`status ${stepId}`);
     } else {
-      return this.textResponse(
-        `I didn't understand that. Here are some things you can try:\n\n` +
-        `- **dashboard** → Overall progress\n` +
-        `- **my tasks** → Your assigned steps\n` +
-        `- **upcoming** → Activities due this week\n` +
-        `- **status 1.A** → Check a step\n` +
-        `- **update 1.A completed** → Update a step\n` +
-        `- **overdue** → Past-due steps\n` +
-        `- **blockers** → Blocked steps\n` +
-        `- **summary** → Leadership summary\n` +
-        `- **help** → Full command list`
-      );
+      return this.buildClarifyingResponse(text, userName);
     }
+  }
+
+  /** Build a clarifying response based on keywords in the user's input */
+  private buildClarifyingResponse(text: string, userName: string): WebhookResponse {
+    const suggestions: string[] = [];
+
+    // Detect what the user might be asking about
+    const hasStepRef = /\b\d+\b/.test(text);
+    const hasPersonRef = /\b(who|person|owner|assigned|team|member)\b/.test(text);
+    const hasStatusRef = /\b(status|progress|done|complete|finish|start|block)\b/.test(text);
+    const hasTimeRef = /\b(when|date|due|deadline|week|month|today|tomorrow|time|schedule)\b/.test(text);
+    const hasCountRef = /\b(how many|count|number|total|percentage|percent)\b/.test(text);
+    const hasListRef = /\b(list|show|all|every|which|what)\b/.test(text);
+    const hasUpdateRef = /\b(update|change|set|move|mark|edit|modify)\b/.test(text);
+
+    if (hasStepRef) {
+      suggestions.push(`📌 To check a step, try: **status 1.A**`);
+      suggestions.push(`📌 To update a step, try: **update 1.A completed**`);
+    }
+    if (hasPersonRef) {
+      suggestions.push(`👤 To see someone's tasks, try: **tasks for [name]**`);
+      suggestions.push(`👤 To see your tasks, try: **my tasks**`);
+    }
+    if (hasStatusRef) {
+      suggestions.push(`📊 To see overall progress, try: **dashboard**`);
+      suggestions.push(`🚫 To see blocked steps, try: **blockers**`);
+    }
+    if (hasTimeRef) {
+      suggestions.push(`📅 To see what's coming up, try: **upcoming** or **due this week**`);
+      suggestions.push(`⏰ To see overdue items, try: **overdue**`);
+    }
+    if (hasCountRef || hasListRef) {
+      suggestions.push(`📈 For a summary, try: **summary**`);
+      suggestions.push(`📋 To see all steps in a workstream, try: **workstream [name]**`);
+    }
+    if (hasUpdateRef) {
+      suggestions.push(`✏️ To update status, try: **update [step ID] completed/in progress/blocked**`);
+      suggestions.push(`✏️ To batch update, try: **mark 1.A and 1.B as completed**`);
+    }
+
+    // If no keywords matched, provide general guidance
+    if (suggestions.length === 0) {
+      suggestions.push(`📊 **dashboard** — See overall progress`);
+      suggestions.push(`📅 **upcoming** — Activities due this week`);
+      suggestions.push(`👤 **my tasks** — Your assigned steps`);
+      suggestions.push(`📈 **summary** — Leadership summary`);
+    }
+
+    // Limit to top 4 most relevant suggestions
+    const topSuggestions = suggestions.slice(0, 4);
+
+    return this.textResponse(
+      `I'm not sure what you're looking for. Could you clarify?\n\n` +
+      `Based on your message, you might want:\n\n` +
+      topSuggestions.join('\n') +
+      `\n\nOr type **help** for the full command list.`
+    );
   }
 }

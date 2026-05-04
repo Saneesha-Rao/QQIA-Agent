@@ -135,6 +135,12 @@ export class InMemoryDataService {
       .slice(0, limit);
   }
 
+  async getAllAudit(limit: number = 200): Promise<AuditEntry[]> {
+    return this.audit
+      .sort((a, b) => b.changedAt.localeCompare(a.changedAt))
+      .slice(0, limit);
+  }
+
   // ---- Users ----
 
   async upsertUser(user: UserProfile): Promise<void> {

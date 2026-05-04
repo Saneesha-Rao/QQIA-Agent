@@ -178,6 +178,14 @@ export class DataService {
     return resources;
   }
 
+  async getAllAudit(limit: number = 200): Promise<AuditEntry[]> {
+    const query = 'SELECT TOP @limit * FROM c ORDER BY c.changedAt DESC';
+    const { resources } = await this.auditContainer.items
+      .query({ query, parameters: [{ name: '@limit', value: limit }] })
+      .fetchAll();
+    return resources;
+  }
+
   // ---- Users ----
 
   async upsertUser(user: UserProfile): Promise<void> {

@@ -872,20 +872,63 @@ export class QQIABot extends TeamsActivityHandler {
       // Last resort: keyword search across all step descriptions
       const found = await this.handleKeywordSearch(context, text);
       if (!found) {
-        await context.sendActivity(
-          `I didn't understand that. Here are some things you can try:\n\n` +
-          `- **dashboard** → Overall progress\n` +
-          `- **my tasks** → Your assigned steps\n` +
-          `- **upcoming** → Activities due this week\n` +
-          `- **status 1.A** → Check a step\n` +
-          `- **update 1.A completed** → Update a step\n` +
-          `- **overdue** → Past-due steps\n` +
-          `- **blockers** → Blocked steps\n` +
-          `- **summary** → Leadership summary\n` +
-          `- **help** → Full command list`
-        );
+        await this.sendClarifyingResponse(context, text);
       }
     }
+  }
+
+  /** Send a clarifying response based on keywords in the user's input */
+  private async sendClarifyingResponse(context: TurnContext, text: string): Promise<void> {
+    const suggestions: string[] = [];
+
+    const hasStepRef = /\b\d+\b/.test(text);
+    const hasPersonRef = /\b(who|person|owner|assigned|team|member)\b/.test(text);
+    const hasStatusRef = /\b(status|progress|done|complete|finish|start|block)\b/.test(text);
+    const hasTimeRef = /\b(when|date|due|deadline|week|month|today|tomorrow|time|schedule)\b/.test(text);
+    const hasCountRef = /\b(how many|count|number|total|percentage|percent)\b/.test(text);
+    const hasListRef = /\b(list|show|all|every|which|what)\b/.test(text);
+    const hasUpdateRef = /\b(update|change|set|move|mark|edit|modify)\b/.test(text);
+
+    if (hasStepRef) {
+      suggestions.push(`📌 To check a step, try: **status 1.A**`);
+      suggestions.push(`📌 To update a step, try: **update 1.A completed**`);
+    }
+    if (hasPersonRef) {
+      suggestions.push(`👤 To see someone's tasks, try: **tasks for [name]**`);
+      suggestions.push(`👤 To see your tasks, try: **my tasks**`);
+    }
+    if (hasStatusRef) {
+      suggestions.push(`📊 To see overall progress, try: **dashboard**`);
+      suggestions.push(`🚫 To see blocked steps, try: **blockers**`);
+    }
+    if (hasTimeRef) {
+      suggestions.push(`📅 To see what's coming up, try: **upcoming** or **due this week**`);
+      suggestions.push(`⏰ To see overdue items, try: **overdue**`);
+    }
+    if (hasCountRef || hasListRef) {
+      suggestions.push(`📈 For a summary, try: **summary**`);
+      suggestions.push(`📋 To see all steps in a workstream, try: **workstream [name]**`);
+    }
+    if (hasUpdateRef) {
+      suggestions.push(`✏️ To update status, try: **update [step ID] completed/in progress/blocked**`);
+      suggestions.push(`✏️ To batch update, try: **mark 1.A and 1.B as completed**`);
+    }
+
+    if (suggestions.length === 0) {
+      suggestions.push(`📊 **dashboard** — See overall progress`);
+      suggestions.push(`📅 **upcoming** — Activities due this week`);
+      suggestions.push(`👤 **my tasks** — Your assigned steps`);
+      suggestions.push(`📈 **summary** — Leadership summary`);
+    }
+
+    const topSuggestions = suggestions.slice(0, 4);
+
+    await context.sendActivity(
+      `I'm not sure what you're looking for. Could you clarify?\n\n` +
+      `Based on your message, you might want:\n\n` +
+      topSuggestions.join('\n') +
+      `\n\nOr type **help** for the full command list.`
+    );
   }
 
   /** Handle "what changed" / audit queries */
@@ -1578,21 +1621,18 @@ export class QQIABot extends TeamsActivityHandler {
   private async handleSyncExcelAction(context: TurnContext): Promise<void> {
     try {
       if (this.comSync?.isAvailable) {
-        await this.comSync.syncToExcel();
-        await context.sendActivity('✅ Excel file synced successfully via COM.');
+        const count = await this.comSync.syncToExcel();
+        await context.sendActivity(`✅ ${count} step(s) synced to Excel via COM.`);
       } else if (this.paSyncService?.isConfigured) {
-        await this.paSyncService.syncToExcel();
-        await context.sendActivity('✅ Excel file synced successfully via Power Automate.');
+        const count = await this.paSyncService.syncToExcel();
+        await context.sendActivity(`✅ ${count} step(s) synced to Excel via Power Automate.`);
       } else {
-        await this.excelSync.syncToExcel();
-        await context.sendActivity('✅ Excel file synced (local copy updated). Download from the web dashboard to get the latest file.');
+        const count = await this.excelSync.syncToExcel();
+        await context.sendActivity(`✅ ${count} step(s) synced to Excel.`);
       }
     } catch {
       await context.sendActivity(
-        '⚠️ Automatic sync is unavailable. To sync manually:\n\n' +
-        '1. Open your Excel file in the browser\n' +
-        '2. Go to **Automate** tab → run the **QQIA Sync** script\n\n' +
-        'Or download the latest file from the [web dashboard](../)'
+        '⚠️ Excel sync failed. Changes are saved in the bot and will sync on the next scheduled cycle (every 15 min).'
       );
     }
   }

@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import * as fs from 'fs';
 import * as path from 'path';
 import { config } from '../config/appConfig';
@@ -306,7 +307,7 @@ export class ExcelSyncService {
   private async syncToExcelViaGraph(): Promise<number> {
     const steps = await this.dataService.getAllSteps();
     const botUpdated = steps.filter(s =>
-      s.lastModifiedSource === 'bot' || s.lastModifiedSource === 'automation'
+      s.lastModifiedSource === 'bot' || s.lastModifiedSource === 'automation' || s.lastModifiedSource === 'webhook'
     );
     if (botUpdated.length === 0) return 0;
 
@@ -354,8 +355,8 @@ export class ExcelSyncService {
         updatedCount++;
         console.log(`📡 Graph: updated step ${step.id} in SharePoint Excel`);
 
-        // Reset source so it won't re-write on next cycle
-        step.lastModifiedSource = 'excel';
+        // Reset source — use 'com_synced' to protect from stale reads
+        step.lastModifiedSource = 'com_synced';
         await this.dataService.upsertStep(step);
       } catch (err: any) {
         console.error(`📡 Graph: failed to update step ${step.id}: ${err.message}`);
@@ -422,8 +423,8 @@ export class ExcelSyncService {
         updatedCount++;
         console.log(`📡 Delegated: updated step ${step.id} in SharePoint Excel`);
 
-        // Reset source so it won't re-write on next cycle
-        step.lastModifiedSource = 'excel';
+        // Reset source — use 'com_synced' to protect from stale reads
+        step.lastModifiedSource = 'com_synced';
         await this.dataService.upsertStep(step);
       } catch (err: any) {
         console.error(`📡 Delegated: failed to update step ${step.id}: ${err.message}`);
@@ -436,46 +437,57 @@ export class ExcelSyncService {
 
   /** Write-back via local file */
   private async syncToExcelLocal(): Promise<number> {
-    const wb = XLSX.readFile(this.localFilePath);
-    const ws = wb.Sheets['FY27_Rollover'];
+    const steps = await this.dataService.getAllSteps();
+    const botUpdated = steps.filter(s =>
+      s.lastModifiedSource === 'bot' || s.lastModifiedSource === 'automation' || s.lastModifiedSource === 'webhook'
+    );
+    if (botUpdated.length === 0) return 0;
+
+    const stepMap = new Map(botUpdated.map(s => [s.id, s]));
+
+    // Use ExcelJS for writes to avoid SheetJS file corruption/bloat
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.readFile(this.localFilePath);
+    const ws = wb.getWorksheet('FY27_Rollover');
     if (!ws) return 0;
 
-    const rows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
-    const steps = await this.dataService.getAllSteps();
-    const stepMap = new Map(steps.map(s => [s.id, s]));
     let updatedCount = 0;
-
-    for (let i = 3; i < rows.length; i++) {
-      const stepId = rows[i][0]?.toString().trim();
-      if (!stepId) continue;
+    ws.eachRow((row, rowNum) => {
+      if (rowNum <= 3) return; // skip header rows
+      const stepId = row.getCell(1).text?.trim();
+      if (!stepId) return;
 
       const dbStep = stepMap.get(stepId);
-      if (!dbStep) continue;
+      if (!dbStep) return;
 
-      if (dbStep.lastModifiedSource === 'bot' || dbStep.lastModifiedSource === 'automation') {
-        let changed = false;
+      let changed = false;
 
-        if (rows[i][5] !== dbStep.corpStatus) { rows[i][5] = dbStep.corpStatus; changed = true; }
-        if (rows[i][9] !== dbStep.fedStatus) { rows[i][9] = dbStep.fedStatus; changed = true; }
-
-        if (dbStep.corpCompletedDate) {
-          const excelDate = isoToExcelDate(dbStep.corpCompletedDate);
-          if (rows[i][6] !== excelDate) { rows[i][6] = excelDate; changed = true; }
-        }
-
-        if (dbStep.referenceNotes && rows[i][18] !== dbStep.referenceNotes) {
-          rows[i][18] = dbStep.referenceNotes;
+      if (row.getCell(6).text !== dbStep.corpStatus) {
+        row.getCell(6).value = dbStep.corpStatus;
+        changed = true;
+      }
+      if (row.getCell(10).text !== dbStep.fedStatus) {
+        row.getCell(10).value = dbStep.fedStatus;
+        changed = true;
+      }
+      if (dbStep.corpCompletedDate) {
+        const excelDate = isoToExcelDate(dbStep.corpCompletedDate);
+        const currentVal = row.getCell(7).value;
+        if (currentVal !== excelDate) {
+          row.getCell(7).value = excelDate;
           changed = true;
         }
-
-        if (changed) updatedCount++;
       }
-    }
+      if (dbStep.referenceNotes && row.getCell(19).text !== dbStep.referenceNotes) {
+        row.getCell(19).value = dbStep.referenceNotes;
+        changed = true;
+      }
+
+      if (changed) updatedCount++;
+    });
 
     if (updatedCount > 0) {
-      const newWs = XLSX.utils.aoa_to_sheet(rows);
-      wb.Sheets['FY27_Rollover'] = newWs;
-      XLSX.writeFile(wb, this.localFilePath);
+      await wb.xlsx.writeFile(this.localFilePath);
       console.log(`📁 Local sync: ${updatedCount} step(s) written to local Excel copy`);
       this.pushToSource();
     }

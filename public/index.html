@@ -198,6 +198,64 @@
     .login-box button:hover { background: var(--primary-dark); }
     .login-box .error-msg { color: var(--danger); font-size: 13px; margin-top: 8px; display: none; }
     .login-box .lock-icon { font-size: 48px; margin-bottom: 12px; }
+
+    /* Audit log panel */
+    .audit-overlay {
+      display: none; position: fixed; inset: 0; z-index: 9998;
+      background: rgba(0,0,0,0.4); align-items: center; justify-content: center;
+    }
+    .audit-overlay.open { display: flex; }
+    .audit-panel {
+      background: white; border-radius: 12px; width: 90%; max-width: 960px;
+      max-height: 85vh; display: flex; flex-direction: column;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.25);
+    }
+    .audit-header {
+      display: flex; align-items: center; gap: 12px; padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+    }
+    .audit-header h2 { font-size: 18px; flex: 1; }
+    .audit-header .close-btn {
+      background: none; border: none; font-size: 22px; cursor: pointer; color: var(--text-muted);
+      padding: 4px 8px; border-radius: 4px;
+    }
+    .audit-header .close-btn:hover { background: #f0f0f0; }
+    .audit-filters {
+      display: flex; gap: 8px; padding: 12px 20px; border-bottom: 1px solid var(--border);
+      flex-wrap: wrap; align-items: center;
+    }
+    .audit-filters select, .audit-filters input {
+      padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px;
+      font-size: 13px; outline: none;
+    }
+    .audit-filters select:focus, .audit-filters input:focus { border-color: var(--primary); }
+    .audit-filters label { font-size: 13px; color: var(--text-muted); font-weight: 600; }
+    .audit-table-wrap { flex: 1; overflow: auto; padding: 0; }
+    .audit-table {
+      width: 100%; border-collapse: collapse; font-size: 13px;
+    }
+    .audit-table th {
+      position: sticky; top: 0; background: #f5f5f5; text-align: left;
+      padding: 10px 12px; font-weight: 600; color: var(--text-muted);
+      border-bottom: 2px solid var(--border);
+    }
+    .audit-table td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; vertical-align: top; }
+    .audit-table tr:hover td { background: #fafafa; }
+    .audit-table .source-badge {
+      display: inline-block; padding: 2px 8px; border-radius: 10px;
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+    }
+    .source-bot { background: #e8f0fe; color: #1a73e8; }
+    .source-excel { background: #e6f4ea; color: #137333; }
+    .source-automation { background: #fef7e0; color: #b06000; }
+    .source-webhook { background: #fce8e6; color: #c5221f; }
+    .audit-table .value-cell { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .audit-table .value-cell:hover { white-space: normal; word-break: break-word; }
+    .audit-empty { padding: 40px; text-align: center; color: var(--text-muted); }
+    .audit-footer {
+      padding: 12px 20px; border-top: 1px solid var(--border);
+      font-size: 12px; color: var(--text-muted); display: flex; justify-content: space-between;
+    }
   </style>
 </head>
 <body>
@@ -210,6 +268,55 @@
       <input type="password" id="accessCodeInput" placeholder="Access code" autocomplete="off" />
       <button onclick="submitAccessCode()">Sign In</button>
       <div class="error-msg" id="loginError">Invalid access code. Please try again.</div>
+    </div>
+  </div>
+
+  <!-- Audit log panel -->
+  <div class="audit-overlay" id="auditOverlay" onclick="if(event.target===this)closeAuditLog()">
+    <div class="audit-panel">
+      <div class="audit-header">
+        <div>&#128220;</div>
+        <h2>Change Log</h2>
+        <button class="close-btn" onclick="closeAuditLog()" title="Close">&times;</button>
+      </div>
+      <div class="audit-filters">
+        <label>Step:</label>
+        <input type="text" id="auditFilterStep" placeholder="e.g. 15.B" style="width:80px" oninput="filterAuditLog()" />
+        <label>Source:</label>
+        <select id="auditFilterSource" onchange="filterAuditLog()">
+          <option value="">All</option>
+          <option value="bot">Bot</option>
+          <option value="excel">Excel</option>
+          <option value="automation">Automation</option>
+          <option value="webhook">Webhook</option>
+        </select>
+        <label>Changed by:</label>
+        <input type="text" id="auditFilterUser" placeholder="Name..." style="width:120px" oninput="filterAuditLog()" />
+        <button class="quick-btn" onclick="loadAuditLog()" style="font-size:12px;padding:4px 12px">&#128260; Refresh</button>
+      </div>
+      <div class="audit-table-wrap">
+        <table class="audit-table">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Step</th>
+              <th>Field</th>
+              <th>Previous</th>
+              <th>New Value</th>
+              <th>Changed By</th>
+              <th>Source</th>
+              <th>Reason</th>
+            </tr>
+          </thead>
+          <tbody id="auditTableBody">
+            <tr><td colspan="8" class="audit-empty">Loading...</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="audit-footer">
+        <span id="auditCount">0 entries</span>
+        <span id="auditTimestamp"></span>
+      </div>
     </div>
   </div>
 
@@ -227,8 +334,9 @@
     <button class="quick-btn" onclick="send('upcoming')">&#128197; Upcoming</button>
     <button class="quick-btn" onclick="send('critical path')">&#128279; Critical Path</button>
     <button class="quick-btn" onclick="send('help')">&#10067; Help</button>
-    <button class="quick-btn" id="syncNowBtn" onclick="triggerOfficeScriptSync()" style="margin-left:auto;color:var(--success);border-color:var(--success)">&#128260; Sync Status</button>
-    <button class="quick-btn" id="downloadBtn" onclick="window.open('/api/download/excel','_blank')" style="color:var(--info);border-color:var(--info)">&#128229; Download Excel</button>
+    <button class="quick-btn" id="syncNowBtn" onclick="triggerOfficeScriptSync()" style="margin-left:auto;color:var(--success);border-color:var(--success)">&#128260; Sync to Excel</button>
+    <a id="excelLink" href="#" target="_blank" class="quick-btn" style="text-decoration:none;color:#217346;border-color:#217346;display:inline-flex;align-items:center;gap:4px">📗 Open Excel</a>
+    <button class="quick-btn" onclick="openAuditLog()" style="color:var(--info);border-color:var(--info)">&#128220; Change Log</button>
   </div>
 
   <div class="messages" id="messages">
@@ -304,47 +412,64 @@
 
     checkAuth();
 
+    // ---- Excel link ----
+    fetch('/api/health').then(function(r){return r.json()}).then(function(h){
+      if(h.excelUrl){
+        document.getElementById('excelLink').href=h.excelUrl;
+      } else {
+        document.getElementById('excelLink').style.display='none';
+      }
+    }).catch(function(){});
+
     // ---- Sync Configuration ----
     var botApiUrl = window.location.origin + '/api/steps/json';
     var pendingSyncCount = 0;
 
     function triggerOfficeScriptSync() {
       var syncBtn = document.getElementById('syncNowBtn');
-      syncBtn.textContent = '\u23F3 Fetching data...';
+      syncBtn.textContent = '\u23F3 Syncing to Excel...';
       syncBtn.disabled = true;
 
-      fetch('/api/steps/json').then(function(res) { return res.json(); }).then(function(data) {
-        // Build tab-separated data: StepID | Corp Status | Corp Completed Date
-        var changedSteps = data.steps.filter(function(s) {
-          return s.lastModifiedBy && s.lastModifiedBy !== 'system';
+      // Trigger server-side sync which pushes changes to Excel
+      fetch('/api/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' } })
+        .then(function(res) { return res.json(); })
+        .then(function(result) {
+          var summary = '';
+          if (result.error) {
+            summary = '⚠️ Sync error: ' + result.error;
+          } else {
+            var fromExcel = result.fromExcel || 0;
+            var toExcel = result.toExcel || 0;
+            var conflicts = (result.conflicts || []).length;
+
+            if (toExcel > 0 || fromExcel > 0 || conflicts > 0) {
+              summary = '✅ **Sync complete!**\n\n';
+              if (toExcel > 0) summary += '📤 **' + toExcel + '** step(s) pushed to Excel\n';
+              if (fromExcel > 0) summary += '📥 **' + fromExcel + '** step(s) pulled from Excel\n';
+              if (conflicts > 0) {
+                summary += '\n⚠️ **' + conflicts + ' conflict(s) detected:**\n\n';
+                var conflictList = result.conflicts || [];
+                for (var ci = 0; ci < conflictList.length; ci++) {
+                  var c = conflictList[ci];
+                  var winner = c.resolution === 'excel_wins' ? 'Excel value kept' : 'Bot value kept';
+                  summary += '• **Step ' + c.stepId + '** — `' + c.field + '`: Excel="' + (c.excelValue || '(empty)') + '" vs Bot="' + (c.dbValue || '(empty)') + '" → ' + winner + '\n';
+                }
+              }
+            } else {
+              summary = '✅ Everything is in sync — no changes to push or pull.';
+            }
+          }
+
+          addMessage(summary, 'bot', true);
+          pendingSyncCount = 0;
+          updateSyncBadge();
+          syncBtn.textContent = '🔄 Sync to Excel';
+          syncBtn.disabled = false;
+        }).catch(function(err) {
+          syncBtn.textContent = '🔄 Sync to Excel';
+          syncBtn.disabled = false;
+          addMessage('❌ Sync failed: ' + err.message, 'bot error');
         });
-        var allSteps = changedSteps.length > 0 ? changedSteps : data.steps;
-
-        var summary = '📊 **' + data.stepCount + ' steps** loaded\n' +
-          '✅ ' + data.steps.filter(function(s) { return s.status === 'Completed'; }).length + ' completed | ' +
-          '⏳ ' + data.steps.filter(function(s) { return s.status === 'In Progress'; }).length + ' in progress | ' +
-          '⚠️ ' + data.steps.filter(function(s) { return s.status === 'Overdue'; }).length + ' overdue\n\n';
-
-        if (changedSteps.length > 0) {
-          summary += '**' + changedSteps.length + ' steps modified by users:**\n';
-          changedSteps.forEach(function(s) {
-            summary += '- **' + s.stepId + '**: ' + s.status + (s.completedDate ? ' (' + s.completedDate + ')' : '') + ' — by ' + s.lastModifiedBy + '\n';
-          });
-          summary += '\n📥 Click **Download** to get the updated Excel file, then upload it to OneDrive.';
-        } else {
-          summary += 'No user-modified steps yet. Use `update <step> <status>` to make changes.';
-        }
-
-        addMessage(summary, 'bot', true);
-        pendingSyncCount = 0;
-        updateSyncBadge();
-        syncBtn.textContent = '🔄 Sync to Excel';
-        syncBtn.disabled = false;
-      }).catch(function(err) {
-        syncBtn.textContent = '🔄 Sync to Excel';
-        syncBtn.disabled = false;
-        addMessage('❌ Failed to fetch data: ' + err.message, 'bot error');
-      });
     }
 
     function showSyncInstructions() {
@@ -536,6 +661,13 @@
           break;
         case 'ColumnSet':
           el.className = 'ac-columnset';
+          if (item.selectAction && item.selectAction.type === 'Action.Submit' && item.selectAction.data) {
+            el.style.cursor = 'pointer';
+            el.title = 'Click to view details';
+            el.onmouseenter = function() { el.style.background = '#f0f0fa'; };
+            el.onmouseleave = function() { el.style.background = ''; };
+            el.onclick = function() { handleCardAction(item.selectAction.data); };
+          }
           (item.columns || []).forEach(function(col) {
             var colEl = document.createElement('div');
             colEl.className = 'ac-column';
@@ -601,6 +733,75 @@
         }
       }, 1000);
     }
+
+    // ---- Audit Log ----
+    var auditData = [];
+
+    function openAuditLog() {
+      document.getElementById('auditOverlay').classList.add('open');
+      loadAuditLog();
+    }
+
+    function closeAuditLog() {
+      document.getElementById('auditOverlay').classList.remove('open');
+    }
+
+    function loadAuditLog() {
+      document.getElementById('auditTableBody').innerHTML = '<tr><td colspan="8" class="audit-empty">Loading...</td></tr>';
+      fetch('/api/audit?limit=200')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          auditData = data.entries || [];
+          document.getElementById('auditTimestamp').textContent = 'As of ' + new Date(data.timestamp).toLocaleString();
+          filterAuditLog();
+        })
+        .catch(function(err) {
+          document.getElementById('auditTableBody').innerHTML = '<tr><td colspan="8" class="audit-empty">Failed to load: ' + err.message + '</td></tr>';
+        });
+    }
+
+    function filterAuditLog() {
+      var stepFilter = document.getElementById('auditFilterStep').value.trim().toLowerCase();
+      var sourceFilter = document.getElementById('auditFilterSource').value;
+      var userFilter = document.getElementById('auditFilterUser').value.trim().toLowerCase();
+
+      var filtered = auditData.filter(function(e) {
+        if (stepFilter && e.stepId.toLowerCase().indexOf(stepFilter) === -1) return false;
+        if (sourceFilter && e.source !== sourceFilter) return false;
+        if (userFilter && (e.changedBy || '').toLowerCase().indexOf(userFilter) === -1) return false;
+        return true;
+      });
+
+      document.getElementById('auditCount').textContent = filtered.length + ' of ' + auditData.length + ' entries';
+      var tbody = document.getElementById('auditTableBody');
+
+      if (filtered.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="audit-empty">No changes recorded yet. Make an update to see the log.</td></tr>';
+        return;
+      }
+
+      var html = '';
+      for (var i = 0; i < filtered.length; i++) {
+        var e = filtered[i];
+        var d = new Date(e.changedAt);
+        var time = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+        var srcClass = 'source-' + (e.source || 'bot');
+        html += '<tr>' +
+          '<td style="white-space:nowrap">' + escHtml(time) + '</td>' +
+          '<td><strong>' + escHtml(e.stepId) + '</strong></td>' +
+          '<td>' + escHtml(e.field) + '</td>' +
+          '<td class="value-cell" title="' + escAttr(e.previousValue) + '">' + escHtml(e.previousValue || '\u2014') + '</td>' +
+          '<td class="value-cell" title="' + escAttr(e.newValue) + '">' + escHtml(e.newValue || '\u2014') + '</td>' +
+          '<td>' + escHtml(e.changedBy) + '</td>' +
+          '<td><span class="source-badge ' + srcClass + '">' + escHtml(e.source) + '</span></td>' +
+          '<td class="value-cell" title="' + escAttr(e.reason || '') + '">' + escHtml(e.reason || '\u2014') + '</td>' +
+          '</tr>';
+      }
+      tbody.innerHTML = html;
+    }
+
+    function escHtml(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+    function escAttr(s) { return String(s || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
   </script>
 </body>
 </html>
