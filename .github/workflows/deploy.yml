@@ -1,8 +1,6 @@
 name: Deploy QQIA Agent
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 env:
