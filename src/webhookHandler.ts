@@ -5,6 +5,7 @@ import { DependencyEngine } from './services/dependencyEngine';
 import { ExcelSyncService } from './services/excelSyncService';
 import { PowerAutomateSyncService } from './services/powerAutomateSyncService';
 import { ExcelComSyncService } from './services/excelComSyncService';
+import { SyncEngine } from './services/syncEngine';
 import { NotificationService } from './services/notificationService';
 import { RolloverStep } from './models/types';
 import { AnalyticsService } from './services/analyticsService';
@@ -37,6 +38,7 @@ export class WebhookHandler {
   private notificationService: NotificationService;
   private paSyncService?: PowerAutomateSyncService;
   private comSync?: ExcelComSyncService;
+  private syncEngine?: SyncEngine;
   private hmacSecret?: string;
   private analyticsService?: AnalyticsService;
 
@@ -47,6 +49,7 @@ export class WebhookHandler {
     notificationService: NotificationService,
     paSyncService?: PowerAutomateSyncService,
     comSync?: ExcelComSyncService,
+    syncEngine?: SyncEngine,
     hmacSecret?: string,
     analyticsService?: AnalyticsService
   ) {
@@ -56,8 +59,26 @@ export class WebhookHandler {
     this.notificationService = notificationService;
     this.paSyncService = paSyncService;
     this.comSync = comSync;
+    this.syncEngine = syncEngine;
     this.hmacSecret = hmacSecret;
     this.analyticsService = analyticsService;
+  }
+
+  /** Sync webhook changes to Excel then refresh staging file for Excel Online readers. */
+  private async writebackAndExport(): Promise<boolean> {
+    try {
+      if (this.comSync?.isAvailable) {
+        await this.comSync.syncToExcel();
+      } else if (this.paSyncService?.isConfigured) {
+        await this.paSyncService.syncToExcel();
+      } else {
+        await this.excelSync.syncToExcel();
+      }
+      try { await this.syncEngine?.exportStagingFile(); } catch { /* non-critical */ }
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /** Validate HMAC-SHA256 signature from Teams */
@@ -106,7 +127,7 @@ export class WebhookHandler {
     text = text.replace(/\bfinished\b/g, 'completed').replace(/\bfinish\b/g, 'complete')
                .replace(/\bstuck\b/g, 'blocked').replace(/\bhold\b/g, 'blocked').replace(/\bon hold\b/g, 'blocked')
                .replace(/\bpending\b/g, 'not started').replace(/\bnot begun\b/g, 'not started').replace(/\bwaiting\b/g, 'not started')
-               .replace(/\bin-progress\b/g, 'in progress').replace(/\bstarted\b/g, 'in progress')
+               .replace(/\bin-progress\b/g, 'in progress')
                .replace(/\bunderway\b/g, 'in progress').replace(/\bongoing\b/g, 'in progress')
                .replace(/\bassigned to\b/g, 'owner').replace(/\bowned by\b/g, 'owner')
                .replace(/\bdelayed\b/g, 'overdue').replace(/\bpast due\b/g, 'overdue').replace(/\bslipped\b/g, 'overdue')
@@ -180,8 +201,12 @@ export class WebhookHandler {
 
   // ---- Response Helpers ----
 
-  private textResponse(text: string): WebhookResponse {
-    return { type: 'message', text };
+  private textResponse(text: string, suggestedActions?: string[]): WebhookResponse {
+    const response: WebhookResponse = { type: 'message', text };
+    if (suggestedActions && suggestedActions.length > 0) {
+      (response as any).suggestedActions = suggestedActions;
+    }
+    return response;
   }
 
   private cardResponse(card: any): WebhookResponse {
@@ -204,8 +229,11 @@ export class WebhookHandler {
       if (!step) {
         return this.textResponse(`Step **${stepId}** not found.`);
       }
+      const synced = await this.writebackAndExport();
       return this.textResponse(
-        `✅ Step **${stepId}** ${field === 'fedStatus' ? '(Fed)' : '(Corp)'} updated to **${newStatus}** by ${userName}.`
+        `✅ Step **${stepId}** ${field === 'fedStatus' ? '(Fed)' : '(Corp)'} updated to **${newStatus}** by ${userName}.` +
+        (synced ? `\n📊 Excel file updated.` : `\n⚠️ Excel sync pending — will retry on next scheduled sync.`),
+        [`Status ${stepId}`, 'Summary', 'Upcoming']
       );
     } else if (data.action === 'view_step') {
       return this.handleStepQuery(`status ${data.stepId}`);
@@ -339,16 +367,48 @@ export class WebhookHandler {
       return this.textResponse('Please provide a step ID, e.g., **update 1.A completed**');
     }
 
-    let newStatus = 'In Progress';
     const lowerText = text.toLowerCase();
-    if (lowerText.includes('completed') || lowerText.includes('complete') || lowerText.includes('done')) {
-      newStatus = 'Completed';
-    } else if (lowerText.includes('blocked') || lowerText.includes('block')) {
-      newStatus = 'Blocked';
-    } else if (lowerText.includes('in progress') || lowerText.includes('started') || lowerText.includes('start')) {
-      newStatus = 'In Progress';
-    } else if (lowerText.includes('not started') || lowerText.includes('reset')) {
-      newStatus = 'Not Started';
+
+    // Explicit status detection with strict matching
+    const validStatuses: Array<{ status: string; patterns: RegExp[] }> = [
+      { status: 'Completed', patterns: [/\bcompleted?\b/, /\bdone\b/, /\bfinished?\b/] },
+      { status: 'Blocked', patterns: [/\bblocked?\b/] },
+      { status: 'Not Started', patterns: [/\bnot started\b/, /\bnot-started\b/, /\breset\b/] },
+      { status: 'In Progress', patterns: [/\bin progress\b/, /\bin-progress\b/, /\bstart\b/] },
+    ];
+
+    let newStatus: string | null = null;
+    for (const entry of validStatuses) {
+      if (entry.patterns.some(p => p.test(lowerText))) {
+        newStatus = entry.status;
+        break;
+      }
+    }
+
+    // If status couldn't be determined, check for fuzzy/misspelled input and confirm
+    if (!newStatus) {
+      // Check for close misspellings
+      const fuzzyMap: Array<{ pattern: RegExp; suggestion: string }> = [
+        { pattern: /\b(non started|no started|notstarted|nt started)\b/, suggestion: 'Not Started' },
+        { pattern: /\b(inprogress|in progres|progres)\b/, suggestion: 'In Progress' },
+        { pattern: /\b(complet|complte|comlete)\b/, suggestion: 'Completed' },
+        { pattern: /\b(blocke|bloked|blcked)\b/, suggestion: 'Blocked' },
+      ];
+      const fuzzyMatch = fuzzyMap.find(f => f.pattern.test(lowerText));
+      if (fuzzyMatch) {
+        return this.textResponse(
+          `❓ Did you mean **${fuzzyMatch.suggestion}**?\n\n` +
+          `"${text}" isn't a recognized status. Valid statuses are:\n` +
+          `- **Not Started** · **In Progress** · **Completed** · **Blocked**\n\n` +
+          `Try: \`update ${allIds[0] || '[step]'} ${fuzzyMatch.suggestion.toLowerCase()}\``
+        );
+      }
+      // Completely unrecognized
+      return this.textResponse(
+        `⚠️ I couldn't determine the status from your message.\n\n` +
+        `Valid statuses are: **Not Started** · **In Progress** · **Completed** · **Blocked**\n\n` +
+        `Example: \`update ${allIds[0] || '[step]'} completed\``
+      );
     }
 
     const isFed = lowerText.startsWith('fed ');
@@ -363,19 +423,10 @@ export class WebhookHandler {
         return this.textResponse(`Step **${stepId}** not found.`);
       }
 
-      let syncMsg = '';
-      try {
-        if (this.comSync?.isAvailable) {
-          await this.comSync.syncToExcel();
-        } else if (this.paSyncService?.isConfigured) {
-          await this.paSyncService.syncToExcel();
-        } else {
-          await this.excelSync.syncToExcel();
-        }
-        syncMsg = `\n📊 Excel file updated.`;
-      } catch {
-        syncMsg = `\n⚠️ Excel sync pending — will retry on next scheduled sync.`;
-      }
+      const synced = await this.writebackAndExport();
+      const syncMsg = synced
+        ? `\n📊 Excel file updated.`
+        : `\n⚠️ Excel sync pending — will retry on next scheduled sync.`;
 
       let unblockMsg = '';
       if (newStatus === 'Completed') {
@@ -388,7 +439,8 @@ export class WebhookHandler {
       return this.textResponse(
         `✅ Step **${stepId}** ${track} status updated to **${newStatus}** by ${userName}.` +
         (newStatus === 'Completed' ? `\nCompleted date set to ${new Date().toISOString().split('T')[0]}.` : '') +
-        syncMsg + unblockMsg
+        syncMsg + unblockMsg,
+        [`Status ${stepId}`, 'Summary', 'Overdue', 'Upcoming']
       );
     }
 
@@ -400,19 +452,10 @@ export class WebhookHandler {
       if (ok) { succeeded.push(sid); } else { failed.push(sid); }
     }
 
-    let syncMsg = '';
-    try {
-      if (this.comSync?.isAvailable) {
-        await this.comSync.syncToExcel();
-      } else if (this.paSyncService?.isConfigured) {
-        await this.paSyncService.syncToExcel();
-      } else {
-        await this.excelSync.syncToExcel();
-      }
-      syncMsg = `\n📊 Excel file updated.`;
-    } catch {
-      syncMsg = `\n⚠️ Excel sync pending — will retry on next scheduled sync.`;
-    }
+    const synced = await this.writebackAndExport();
+    const syncMsg = synced
+      ? `\n📊 Excel file updated.`
+      : `\n⚠️ Excel sync pending — will retry on next scheduled sync.`;
 
     let msg = `✅ **Batch update**: ${succeeded.length} step(s) set to **${newStatus}** (${track}) by ${userName}.`;
     if (succeeded.length > 0) msg += `\n✔️ Updated: ${succeeded.join(', ')}`;
@@ -420,7 +463,7 @@ export class WebhookHandler {
     if (newStatus === 'Completed') msg += `\nCompleted date set to ${new Date().toISOString().split('T')[0]}.`;
     msg += syncMsg;
 
-    return this.textResponse(msg);
+    return this.textResponse(msg, ['Summary', 'Overdue', 'Upcoming']);
   }
 
   private async handleBlockers(): Promise<WebhookResponse> {
@@ -534,7 +577,7 @@ export class WebhookHandler {
         summary += `- **${s.id}** ${s.description} (Owner: ${s.wwicPoc || s.engineeringDri})\n`;
       }
     }
-    return this.textResponse(summary);
+    return this.textResponse(summary, ['Overdue', 'Blockers', 'Upcoming', 'Critical Path']);
   }
 
   private async handleUpcoming(days: number = 7): Promise<WebhookResponse> {
@@ -645,7 +688,10 @@ export class WebhookHandler {
   }
 
   private async handleSync(): Promise<WebhookResponse> {
-    const result = await this.excelSync.fullSync();
+    const result = this.syncEngine
+      ? await this.syncEngine.runSync()
+      : await this.excelSync.fullSync();
+    try { await this.syncEngine?.exportStagingFile(); } catch { /* non-critical */ }
     return this.textResponse(
       `✅ Sync complete!\n- **${result.fromExcel}** updates from Excel\n- **${result.toExcel}** updates pushed to Excel`
     );
@@ -670,7 +716,11 @@ export class WebhookHandler {
     step.lastModifiedSource = 'webhook';
     await this.dataService.upsertStep(step);
     await this.dataService.logAudit(stepId, 'referenceNotes', oldNotes, step.referenceNotes, userName, 'webhook');
-    return this.textResponse(`📝 Note added to step **${stepId}**.`);
+    const synced = await this.writebackAndExport();
+    return this.textResponse(
+      `📝 Note added to step **${stepId}**.` +
+      (synced ? `\n📊 Excel file updated.` : `\n⚠️ Excel sync pending — will retry on next scheduled sync.`)
+    );
   }
 
   private async handleFedQuery(text: string, userName: string): Promise<WebhookResponse> {
@@ -746,10 +796,21 @@ export class WebhookHandler {
         text.includes('in progress') || text.includes('blocked') || text.includes('complete') ||
         text.includes('mark') || text.includes('set');
     if (allStepIds.length > 0 && hasUpdateIntent) {
-      let newStatus = 'Completed';
-      if (text.includes('in progress') || text.includes('in-progress') || text.includes('started')) newStatus = 'In Progress';
-      else if (text.includes('blocked') || text.includes('block')) newStatus = 'Blocked';
-      else if (text.includes('not started') || text.includes('reset')) newStatus = 'Not Started';
+      let newStatus: string | null = null;
+      if (/\bnot started\b|\bnot-started\b|\breset\b/.test(text)) newStatus = 'Not Started';
+      else if (/\bin progress\b|\bin-progress\b/.test(text)) newStatus = 'In Progress';
+      else if (/\bblocked?\b/.test(text)) newStatus = 'Blocked';
+      else if (/\bcompleted?\b|\bdone\b/.test(text)) newStatus = 'Completed';
+
+      if (!newStatus) {
+        // Fuzzy match for common misspellings
+        if (/\b(non started|no started|notstarted|nt started)\b/.test(text)) {
+          return this.textResponse(`❓ Did you mean **Not Started**?\n\nTry: \`mark ${allStepIds[0]} not started\``);
+        }
+        return this.textResponse(
+          `⚠️ I couldn't determine the status.\n\nValid: **Not Started** · **In Progress** · **Completed** · **Blocked**\n\nExample: \`mark ${allStepIds[0]} completed\``
+        );
+      }
       const field = text.includes('fed') ? 'fedStatus' : 'corpStatus';
       const track = field === 'fedStatus' ? 'Fed' : 'Corp';
 
@@ -759,6 +820,8 @@ export class WebhookHandler {
         if (!step) return this.textResponse(`Step **${sid}** not found.`);
         let msg = `✅ Step **${sid}** (${track}) updated to **${newStatus}** by ${userName}.`;
         if (newStatus === 'Completed') msg += `\nCompleted date set to ${new Date().toISOString().split('T')[0]}.`;
+        const synced = await this.writebackAndExport();
+        msg += synced ? `\n📊 Excel file updated.` : `\n⚠️ Excel sync pending — will retry on next scheduled sync.`;
         return this.textResponse(msg);
       }
 
@@ -773,6 +836,8 @@ export class WebhookHandler {
       if (succeeded.length > 0) msg += `\n✔️ Updated: ${succeeded.join(', ')}`;
       if (failed.length > 0) msg += `\n⚠️ Not found: ${failed.join(', ')}`;
       if (newStatus === 'Completed') msg += `\nCompleted date set to ${new Date().toISOString().split('T')[0]}.`;
+      const synced = await this.writebackAndExport();
+      msg += synced ? `\n📊 Excel file updated.` : `\n⚠️ Excel sync pending — will retry on next scheduled sync.`;
       return this.textResponse(msg);
     }
     // Handle natural language status queries like "what is the status of step 1.A"
@@ -909,10 +974,16 @@ export class WebhookHandler {
       }
     }
 
-    // Pattern 3: "what does [name] need/have/do"
+    // Pattern 3: "what/when does [name] need/have/do/start"
     if (!detectedName) {
-      const doesMatch = timeStripped.match(/what\s+(?:does|should|will|can)\s+(\w[\w\s]*?)\s+(?:need|have|do|start|complete|own)/i);
-      if (doesMatch) detectedName = doesMatch[1].trim();
+      const doesMatch = timeStripped.match(/(?:what|when)\s+(?:does|should|will|can|do)\s+(?:the\s+)?(\w[\w\s]*?)\s+(?:need|have|do|start|complete|own|begin|kick off)/i);
+      if (doesMatch) detectedName = doesMatch[1].replace(/\s*(?:activities|tasks?|steps?|items|work)\s*$/i, '').trim();
+    }
+
+    // Pattern 3b: "when should the [name] activities/tasks start"
+    if (!detectedName) {
+      const whenMatch = timeStripped.match(/when\s+(?:should|will|does|do)\s+(?:the\s+)?(.+?)\s+(?:activities|tasks?|steps?|items|work)\s+(?:start|begin|kick off|launch)/i);
+      if (whenMatch) detectedName = whenMatch[1].replace(/\s+team$|\s+group$/i, '').trim();
     }
 
     // Pattern 4: "what are [name] action items/tasks/activities" (no possessive, no "for")

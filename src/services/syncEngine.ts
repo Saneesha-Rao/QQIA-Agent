@@ -425,14 +425,22 @@ export class SyncEngine {
     const steps = await this.dataService.getAllSteps();
     if (steps.length === 0) return '';
 
+    // Only export steps changed by bot/automation/webhook — not unchanged Excel data
+    const changedSteps = steps.filter(s =>
+      s.lastModifiedSource === 'bot' ||
+      s.lastModifiedSource === 'automation' ||
+      s.lastModifiedSource === 'webhook' ||
+      s.lastModifiedSource === 'com_synced'
+    );
+
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('BotData');
 
     // Header row
     ws.addRow(['StepId', 'CorpStatus', 'FedStatus', 'CorpCompletedDate', 'ReferenceNotes', 'LastModifiedSource', 'LastModified']);
 
-    // Data rows — export ALL steps so the Office Script can compare
-    for (const step of steps) {
+    // Data rows — only bot/automation-changed steps
+    for (const step of changedSteps) {
       ws.addRow([
         step.id,
         step.corpStatus || '',
@@ -454,7 +462,14 @@ export class SyncEngine {
       : path.join(process.cwd(), 'data', 'qqia-bot-sync.xlsx');
 
     await wb.xlsx.writeFile(stagingPath);
-    console.log(`[SyncEngine] Exported ${steps.length} steps to staging file: ${stagingPath}`);
+    console.log(`[SyncEngine] Exported ${changedSteps.length} changed steps to staging file: ${stagingPath}`);
+
+    // Mark exported steps so they don't appear in the next export
+    for (const step of changedSteps) {
+      step.lastModifiedSource = 'staged';
+      await this.dataService.upsertStep(step);
+    }
+
     return stagingPath;
   }
 }

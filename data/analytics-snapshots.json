@@ -1,0 +1,20 @@
+[
+  {
+    "date": "2026-05-05",
+    "track": "Corp",
+    "completed": 20,
+    "inProgress": 13,
+    "blocked": 2,
+    "notStarted": 145,
+    "total": 180
+  },
+  {
+    "date": "2026-05-05",
+    "track": "Fed",
+    "completed": 7,
+    "inProgress": 2,
+    "blocked": 0,
+    "notStarted": 168,
+    "total": 177
+  }
+]

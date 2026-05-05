@@ -37,6 +37,9 @@
       align-items: center;
       gap: 12px;
       box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      position: relative;
+      z-index: 100;
+      flex-shrink: 0;
     }
     .header h1 { font-size: 18px; font-weight: 600; }
     .header .status { font-size: 12px; opacity: 0.8; margin-left: auto; }
@@ -51,6 +54,9 @@
       background: var(--card-bg);
       border-bottom: 1px solid var(--border);
       flex-wrap: wrap;
+      flex-shrink: 0;
+      position: relative;
+      z-index: 50;
     }
     .quick-btn {
       padding: 6px 14px;
@@ -70,6 +76,8 @@
       overflow-y: auto;
       padding: 16px 20px;
       display: flex;
+      position: relative;
+      z-index: 1;
       flex-direction: column;
       gap: 12px;
     }
@@ -102,6 +110,58 @@
     .message.bot .markdown p { margin: 4px 0; }
     .message.error { background: #fde7e9; border-color: var(--danger); color: var(--danger); }
     .message.loading { color: var(--text-muted); font-style: italic; }
+
+    /* Typing indicator */
+    .typing-indicator {
+      display: flex; align-items: center; gap: 4px; padding: 12px 16px;
+      align-self: flex-start; background: var(--card-bg); border: 1px solid var(--border);
+      border-radius: 8px; border-bottom-left-radius: 2px; animation: fadeIn 0.2s ease;
+    }
+    .typing-indicator .dot {
+      width: 8px; height: 8px; background: var(--primary); border-radius: 50%;
+      animation: typingBounce 1.4s infinite ease-in-out both;
+    }
+    .typing-indicator .dot:nth-child(1) { animation-delay: 0s; }
+    .typing-indicator .dot:nth-child(2) { animation-delay: 0.2s; }
+    .typing-indicator .dot:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes typingBounce {
+      0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+      40% { transform: scale(1); opacity: 1; }
+    }
+
+    /* Toast notifications */
+    .toast-container {
+      position: fixed; top: 60px; right: 20px; z-index: 10000;
+      display: flex; flex-direction: column; gap: 8px; pointer-events: none;
+    }
+    .toast {
+      background: var(--card-bg); border: 1px solid var(--border);
+      border-radius: 8px; padding: 10px 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      font-size: 13px; display: flex; align-items: center; gap: 8px;
+      animation: toastSlideIn 0.3s ease; pointer-events: auto; max-width: 320px;
+    }
+    .toast.toast-exit { animation: toastSlideOut 0.3s ease forwards; }
+    .toast-icon { font-size: 16px; flex-shrink: 0; }
+    .toast-info { border-left: 3px solid var(--info); }
+    .toast-success { border-left: 3px solid var(--success); }
+    .toast-warning { border-left: 3px solid var(--warning); }
+    @keyframes toastSlideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    @keyframes toastSlideOut { from { transform: translateX(0); opacity: 1; } to { transform: translateX(100%); opacity: 0; } }
+
+    /* Suggested action chips */
+    .suggested-actions {
+      display: flex; gap: 8px; flex-wrap: wrap; padding: 8px 0;
+      animation: fadeIn 0.3s ease;
+    }
+    .suggested-chip {
+      padding: 6px 14px; border: 1px solid var(--primary); border-radius: 16px;
+      background: white; color: var(--primary); font-size: 13px; cursor: pointer;
+      transition: all 0.15s; font-weight: 500;
+    }
+    .suggested-chip:hover {
+      background: var(--primary); color: white; transform: translateY(-1px);
+      box-shadow: 0 2px 6px rgba(98, 100, 167, 0.3);
+    }
 
     /* Adaptive Card rendering */
     .adaptive-card {
@@ -257,7 +317,7 @@
       font-size: 12px; color: var(--text-muted); display: flex; justify-content: space-between;
     }
   </style>
-  <link rel="stylesheet" href="/analytics.css">
+  <link rel="stylesheet" href="/analytics.css?v=3">
 </head>
 <body>
   <!-- Login gate -->
@@ -273,6 +333,7 @@
   </div>
 
   <!-- Audit log panel -->
+  <div class="toast-container" id="toastContainer"></div>
   <div class="audit-overlay" id="auditOverlay" onclick="if(event.target===this)closeAuditLog()">
     <div class="audit-panel">
       <div class="audit-header">
@@ -328,26 +389,20 @@
   </div>
 
   <div class="quick-actions">
-    <button class="quick-btn" onclick="send('dashboard')">&#128202; Dashboard</button>
+    <button class="quick-btn" id="tab-analytics-btn" onclick="switchTab('analytics')" style="color:#7c3aed;border-color:#7c3aed;font-weight:600">📊 Analytics</button>
+    <button class="quick-btn" id="tab-chat-btn" onclick="switchTab('chat')" style="color:#7c3aed;border-color:#7c3aed;display:none">💬 Back to Chat</button>
     <button class="quick-btn" onclick="send('summary')">&#128200; Summary</button>
     <button class="quick-btn" onclick="send('overdue')">&#9888;&#65039; Overdue</button>
     <button class="quick-btn" onclick="send('blockers')">&#128721; Blockers</button>
     <button class="quick-btn" onclick="send('upcoming')">&#128197; Upcoming</button>
     <button class="quick-btn" onclick="send('critical path')">&#128279; Critical Path</button>
     <button class="quick-btn" onclick="send('help')">&#10067; Help</button>
-    <button class="quick-btn" id="syncNowBtn" onclick="triggerOfficeScriptSync()" style="margin-left:auto;color:var(--success);border-color:var(--success)">&#128260; Sync to Excel</button>
     <a id="excelLink" href="#" target="_blank" class="quick-btn" style="text-decoration:none;color:#217346;border-color:#217346;display:inline-flex;align-items:center;gap:4px">📗 Open Excel</a>
     <button class="quick-btn" onclick="openAuditLog()" style="color:var(--info);border-color:var(--info)">&#128220; Change Log</button>
   </div>
 
-  <!-- Tab navigation -->
-  <div style="display:flex;gap:0;border-bottom:2px solid #e5e7eb;margin:0 16px;">
-    <button id="tab-chat" class="quick-btn" onclick="switchTab('chat')" style="border:none;border-bottom:2px solid #2563eb;border-radius:0;margin-bottom:-2px;font-weight:600;color:#2563eb">💬 Chat</button>
-    <button id="tab-analytics" class="quick-btn" onclick="switchTab('analytics')" style="border:none;border-bottom:2px solid transparent;border-radius:0;margin-bottom:-2px;color:#6b7280">📊 Analytics</button>
-  </div>
-
   <!-- Analytics view -->
-  <div id="analytics-container" style="display:none;padding:0 16px;overflow-y:auto;flex:1"></div>
+  <div id="analytics-container" style="display:none;padding:16px 20px;overflow-y:auto;flex:1"></div>
 
   <!-- Chat view -->
 
@@ -538,7 +593,7 @@
       inputEl.value = '';
       sendBtn.disabled = true;
 
-      var loadingEl = addMessage('Thinking...', 'bot loading');
+      var loadingEl = showTypingIndicator();
       var isUpdate = /^(update |mark |complete |fed update |fed mark )/.test(text.toLowerCase());
 
       fetch('/api/webhook', {
@@ -555,10 +610,14 @@
           addMessage('No response received.', 'bot error');
         }
 
+        // Render suggested follow-up actions
+        if (data.suggestedActions && data.suggestedActions.length > 0) {
+          renderSuggestedActions(data.suggestedActions);
+        }
+
         // Track pending changes for sync notification
         if (isUpdate && data.text && data.text.indexOf('\u2705') !== -1) {
-          pendingSyncCount++;
-          updateSyncBadge();
+          if (window.showToast) window.showToast('Step updated successfully', 'success');
         }
 
         sendBtn.disabled = false;
@@ -621,6 +680,54 @@
       return el;
     }
 
+    function showTypingIndicator() {
+      var el = document.createElement('div');
+      el.className = 'typing-indicator';
+      el.innerHTML = '<div class="dot"></div><div class="dot"></div><div class="dot"></div>';
+      messagesEl.appendChild(el);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+      return el;
+    }
+
+    // Toast notification system
+    function showToast(message, type) {
+      type = type || 'info';
+      var icons = { info: 'ℹ️', success: '✅', warning: '⚠️' };
+      var container = document.getElementById('toastContainer');
+      var toast = document.createElement('div');
+      toast.className = 'toast toast-' + type;
+      toast.innerHTML = '<span class="toast-icon">' + (icons[type] || 'ℹ️') + '</span><span>' + message + '</span>';
+      container.appendChild(toast);
+      setTimeout(function() {
+        toast.classList.add('toast-exit');
+        setTimeout(function() { toast.remove(); }, 300);
+      }, 3500);
+    }
+    window.showToast = showToast;
+
+    // Suggested follow-up action chips
+    function renderSuggestedActions(actions) {
+      // Remove any previous suggestions
+      var prev = document.querySelector('.suggested-actions');
+      if (prev) prev.remove();
+
+      var container = document.createElement('div');
+      container.className = 'suggested-actions';
+      actions.forEach(function(actionText) {
+        var chip = document.createElement('button');
+        chip.className = 'suggested-chip';
+        chip.textContent = actionText;
+        chip.onclick = function() {
+          container.remove();
+          inputEl.value = actionText;
+          sendInput();
+        };
+        container.appendChild(chip);
+      });
+      messagesEl.appendChild(container);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
     function renderMarkdown(text) {
       return text
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -643,16 +750,31 @@
       if (card.actions) {
         var actionsDiv = document.createElement('div');
         actionsDiv.style.marginTop = '8px';
+        actionsDiv.style.display = 'flex';
+        actionsDiv.style.gap = '8px';
+        actionsDiv.style.flexWrap = 'wrap';
         card.actions.forEach(function(action) {
           var btn = document.createElement('button');
           btn.className = 'ac-action-btn';
           btn.textContent = action.title;
-          btn.onclick = function() {
-            if (action.type === 'Action.Submit' && action.data) {
-              handleCardAction(action.data);
-            }
-          };
+          btn.setAttribute('data-action', JSON.stringify(action.data || {}));
+          // Style based on action type
+          if (action.title.indexOf('Complete') !== -1) {
+            btn.style.borderColor = 'var(--success)'; btn.style.color = 'var(--success)';
+          } else if (action.title.indexOf('Progress') !== -1) {
+            btn.style.background = 'var(--primary)'; btn.style.color = 'white'; btn.style.borderColor = 'var(--primary)';
+          } else if (action.title.indexOf('Blocked') !== -1) {
+            btn.style.borderColor = 'var(--danger)'; btn.style.color = 'var(--danger)';
+          }
           actionsDiv.appendChild(btn);
+        });
+        // Event delegation for reliability
+        actionsDiv.addEventListener('click', function(e) {
+          var target = e.target.closest('.ac-action-btn');
+          if (target && target.getAttribute('data-action')) {
+            var actionData = JSON.parse(target.getAttribute('data-action'));
+            if (actionData.action) handleCardAction(actionData);
+          }
         });
         el.appendChild(actionsDiv);
       }
@@ -707,8 +829,15 @@
             var btn = document.createElement('button');
             btn.className = 'ac-action-btn';
             btn.textContent = action.title;
-            btn.onclick = function() { if (action.data) handleCardAction(action.data); };
+            btn.setAttribute('data-action', JSON.stringify(action.data || {}));
             el.appendChild(btn);
+          });
+          el.addEventListener('click', function(e) {
+            var target = e.target.closest('.ac-action-btn');
+            if (target && target.getAttribute('data-action')) {
+              var actionData = JSON.parse(target.getAttribute('data-action'));
+              if (actionData.action) handleCardAction(actionData);
+            }
           });
           break;
         default:
@@ -817,37 +946,29 @@
 
     // ---- Tab switching ----
     function switchTab(tab) {
-      const chatView = document.getElementById('messages');
-      const inputArea = document.querySelector('.input-area');
-      const analyticsView = document.getElementById('analytics-container');
-      const tabChat = document.getElementById('tab-chat');
-      const tabAnalytics = document.getElementById('tab-analytics');
+      var chatView = document.getElementById('messages');
+      var inputArea = document.querySelector('.input-area');
+      var analyticsView = document.getElementById('analytics-container');
+      var btnAnalytics = document.getElementById('tab-analytics-btn');
+      var btnChat = document.getElementById('tab-chat-btn');
       if (tab === 'analytics') {
         chatView.style.display = 'none';
         if (inputArea) inputArea.style.display = 'none';
         analyticsView.style.display = 'block';
-        tabChat.style.borderBottomColor = 'transparent';
-        tabChat.style.color = '#6b7280';
-        tabChat.style.fontWeight = 'normal';
-        tabAnalytics.style.borderBottomColor = '#2563eb';
-        tabAnalytics.style.color = '#2563eb';
-        tabAnalytics.style.fontWeight = '600';
+        btnAnalytics.style.display = 'none';
+        btnChat.style.display = '';
         if (window.initAnalytics) window.initAnalytics();
       } else {
         chatView.style.display = '';
         if (inputArea) inputArea.style.display = '';
         analyticsView.style.display = 'none';
-        tabAnalytics.style.borderBottomColor = 'transparent';
-        tabAnalytics.style.color = '#6b7280';
-        tabAnalytics.style.fontWeight = 'normal';
-        tabChat.style.borderBottomColor = '#2563eb';
-        tabChat.style.color = '#2563eb';
-        tabChat.style.fontWeight = '600';
+        btnAnalytics.style.display = '';
+        btnChat.style.display = 'none';
       }
     }
     window.switchTab = switchTab;
   </script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-  <script src="/analytics.js"></script>
+  <script src="/analytics.js?v=8"></script>
 </body>
 </html>

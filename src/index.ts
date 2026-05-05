@@ -67,12 +67,12 @@ const syncEngine = new SyncEngine(dataService as any, graphService, dependencyEn
 const analyticsService = new AnalyticsService();
 
 // Create the bot with all services (pass PA sync and COM sync for SharePoint write-back)
-const bot = new QQIABot(dataService as any, dependencyEngine, excelSync, notificationService, paSyncService, comSync);
+const bot = new QQIABot(dataService as any, dependencyEngine, excelSync, notificationService, paSyncService, comSync, syncEngine);
 
 // Create webhook handler for Teams Outgoing Webhook (no AAD/Azure required)
 const webhookHandler = new WebhookHandler(
   dataService, dependencyEngine, excelSync, notificationService,
-  paSyncService, comSync, process.env.WEBHOOK_HMAC_SECRET, analyticsService
+  paSyncService, comSync, syncEngine, process.env.WEBHOOK_HMAC_SECRET, analyticsService
 );
 
 // ---- HTTP Server ----
@@ -82,6 +82,7 @@ server.use(helmet({
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://adaptivecards.io"],
+      scriptSrcAttr: ["'unsafe-inline'"],
       styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"],
       imgSrc: ["'self'", "data:", "https:"],
       connectSrc: ["'self'"],
@@ -199,7 +200,7 @@ server.post('/api/messages', async (req, res) => {
 
 // Download the updated Excel file
 server.get('/api/download/excel', (req, res) => {
-  const excelPath = path.join(__dirname, '..', 'data', 'FY27_Mint_RolloverTimeline.xlsx');
+  const excelPath = excelSync.getDownloadFilePath();
   if (!fs.existsSync(excelPath)) {
     res.status(404).json({ error: 'Excel file not found' });
     return;

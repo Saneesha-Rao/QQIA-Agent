@@ -4,6 +4,8 @@
  */
 import { RolloverStep, Milestone, AuditEntry } from '../models/types';
 import { DependencyEngine, WorkstreamStats } from './dependencyEngine';
+import * as fs from 'fs';
+import * as path from 'path';
 
 // ---- Types ----
 
@@ -65,8 +67,37 @@ export interface ChangeEntry {
 // ---- Service ----
 
 export class AnalyticsService {
-  /** In-memory daily snapshots (persists for session, seeded on startup) */
   private snapshots: DailySnapshot[] = [];
+  private readonly snapshotFile: string;
+
+  constructor() {
+    // Persist snapshots to data/analytics-snapshots.json
+    this.snapshotFile = path.join(__dirname, '..', '..', 'data', 'analytics-snapshots.json');
+    this.loadFromDisk();
+  }
+
+  private loadFromDisk(): void {
+    try {
+      if (fs.existsSync(this.snapshotFile)) {
+        const raw = fs.readFileSync(this.snapshotFile, 'utf-8');
+        this.snapshots = JSON.parse(raw);
+        console.log(`📈 Loaded ${this.snapshots.length} analytics snapshots from disk`);
+      }
+    } catch (e) {
+      console.warn('⚠️ Could not load analytics snapshots:', (e as Error).message);
+      this.snapshots = [];
+    }
+  }
+
+  private saveToDisk(): void {
+    try {
+      const dir = path.dirname(this.snapshotFile);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(this.snapshotFile, JSON.stringify(this.snapshots, null, 2));
+    } catch (e) {
+      console.warn('⚠️ Could not save analytics snapshots:', (e as Error).message);
+    }
+  }
 
   /**
    * Record a daily snapshot of current step statuses.
@@ -92,6 +123,7 @@ export class AnalyticsService {
     };
     this.snapshots.push(snap);
     this.snapshots.sort((a, b) => a.date.localeCompare(b.date));
+    this.saveToDisk();
     return snap;
   }
 
@@ -201,20 +233,17 @@ export class AnalyticsService {
       const overdue = overdueByWs.get(ws) || 0;
       const completionPct = stat.total > 0 ? Math.round((stat.completed / stat.total) * 100) : 0;
 
-      // Risk score: 0-100. Higher = riskier
-      // Factors: blocked %, overdue %, not-started % (weighted)
-      const blockedPct = stat.total > 0 ? (stat.blocked / stat.total) * 100 : 0;
-      const overduePct = stat.total > 0 ? (overdue / stat.total) * 100 : 0;
-      const notStartedPct = stat.total > 0 ? (stat.notStarted / stat.total) * 100 : 0;
-      const riskScore = Math.min(100, Math.round(
-        blockedPct * 1.5 + overduePct * 2.0 + notStartedPct * 0.3
-      ));
+      // Risk score: count of actionable issues (blocked + overdue)
+      const riskScore = stat.blocked + overdue;
 
-      // Health: green (>70% complete, no blockers), yellow (40-70% or few issues), red (<40% or major issues)
+      // Health: contextual — early in the rollover, low completion is expected
+      // green: on track (has progress or no blockers/overdue)
+      // yellow: some risk (has overdue or blocked items)
+      // red: high risk (multiple blockers or many overdue)
       let health: 'green' | 'yellow' | 'red';
-      if (stat.blocked > 0 || overdue > 2 || completionPct < 40) {
+      if (stat.blocked > 2 || overdue > 4) {
         health = 'red';
-      } else if (overdue > 0 || completionPct < 70) {
+      } else if (stat.blocked > 0 || overdue > 1) {
         health = 'yellow';
       } else {
         health = 'green';
@@ -228,8 +257,19 @@ export class AnalyticsService {
       });
     }
 
-    // Sort by risk (highest first)
-    results.sort((a, b) => b.riskScore - a.riskScore);
+    // Sort by Excel grouping order
+    const WORKSTREAM_ORDER = [
+      'System Rollover', 'Perspective Config', 'MSC FY27 Rollover', 'Plan Config',
+      'Data Ingestion', 'Orchestration', 'Quota Issuance', 'MintX Participant Setup',
+      'Blueprint / EDM / HR Data', 'Actuals Visibility', 'Territory Mgmt',
+      'ICBM Rollover', 'MSX Earnings Rollover', 'Payline Modeling', 'PPA/QA',
+      '= Needs Attention', 'ARR (MSC)',
+    ];
+    results.sort((a, b) => {
+      const ai = WORKSTREAM_ORDER.indexOf(a.workstream);
+      const bi = WORKSTREAM_ORDER.indexOf(b.workstream);
+      return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+    });
     return results;
   }
 
@@ -254,8 +294,17 @@ export class AnalyticsService {
         owner: s.engineeringDri || s.wwicPoc || '',
       }))
       .sort((a, b) => {
-        // Sort by workstream, then by start date
-        const wsCmp = a.workstream.localeCompare(b.workstream);
+        // Sort by Excel grouping order, then by start date
+        const WORKSTREAM_ORDER = [
+          'System Rollover', 'Perspective Config', 'MSC FY27 Rollover', 'Plan Config',
+          'Data Ingestion', 'Orchestration', 'Quota Issuance', 'MintX Participant Setup',
+          'Blueprint / EDM / HR Data', 'Actuals Visibility', 'Territory Mgmt',
+          'ICBM Rollover', 'MSX Earnings Rollover', 'Payline Modeling', 'PPA/QA',
+          '= Needs Attention', 'ARR (MSC)',
+        ];
+        const ai = WORKSTREAM_ORDER.indexOf(a.workstream);
+        const bi = WORKSTREAM_ORDER.indexOf(b.workstream);
+        const wsCmp = (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
         if (wsCmp !== 0) return wsCmp;
         if (!a.start) return 1;
         if (!b.start) return -1;

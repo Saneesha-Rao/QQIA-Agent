@@ -136,7 +136,9 @@ export class PowerAutomateSyncService {
   async syncToExcel(): Promise<number> {
     const steps = await this.dataService.getAllSteps();
     const botUpdated = steps.filter(s =>
-      s.lastModifiedSource === 'bot' || s.lastModifiedSource === 'automation'
+      s.lastModifiedSource === 'bot' ||
+      s.lastModifiedSource === 'automation' ||
+      s.lastModifiedSource === 'webhook'
     );
 
     if (botUpdated.length === 0) return 0;
@@ -153,9 +155,9 @@ export class PowerAutomateSyncService {
 
     const count = await this.writeToExcel(updates);
 
-    // Reset source so they won't re-write on next cycle
+    // Mark as synced by bot-side channel so Excel pull does not immediately revert them.
     for (const step of botUpdated) {
-      step.lastModifiedSource = 'excel';
+      step.lastModifiedSource = 'com_synced';
       await this.dataService.upsertStep(step);
     }
 
@@ -175,8 +177,14 @@ export class PowerAutomateSyncService {
         continue;
       }
 
-      // Only accept Excel changes if DB wasn't modified by bot/automation
-      if (dbStep.lastModifiedSource === 'bot' || dbStep.lastModifiedSource === 'automation') {
+      // Do not overwrite bot-originated writes that may still be propagating in Excel.
+      if (
+        dbStep.lastModifiedSource === 'bot' ||
+        dbStep.lastModifiedSource === 'automation' ||
+        dbStep.lastModifiedSource === 'webhook' ||
+        dbStep.lastModifiedSource === 'com_synced' ||
+        dbStep.lastModifiedSource === 'staged'
+      ) {
         continue;
       }
 

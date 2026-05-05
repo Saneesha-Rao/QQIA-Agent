@@ -96,6 +96,19 @@ export class ExcelSyncService {
     }
   }
 
+  /**
+   * Refresh local working copy (if possible) and return the best file path for downloads.
+   * Prefer source workbook so users always get authoritative data; fall back to local copy.
+   */
+  getDownloadFilePath(): string {
+    if (fs.existsSync(this.sourceFilePath)) {
+      return this.sourceFilePath;
+    }
+
+    this.refreshLocalCopy();
+    return this.localFilePath;
+  }
+
   /** Try to push local working copy back to the OneDrive source */
   private pushToSource(): boolean {
     try {

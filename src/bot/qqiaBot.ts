@@ -11,6 +11,7 @@ import { ExcelSyncService } from '../services/excelSyncService';
 import { PowerAutomateSyncService } from '../services/powerAutomateSyncService';
 import { ExcelComSyncService } from '../services/excelComSyncService';
 import { NotificationService } from '../services/notificationService';
+import { SyncEngine } from '../services/syncEngine';
 import { RolloverStep } from '../models/types';
 import {
   buildOverallDashboardCard,
@@ -30,6 +31,7 @@ export class QQIABot extends TeamsActivityHandler {
   private notificationService: NotificationService;
   private paSyncService?: PowerAutomateSyncService;
   private comSync?: ExcelComSyncService;
+  private syncEngine?: SyncEngine;
   /** Track last viewed step per conversation for follow-up questions */
   private lastViewedStep: Map<string, string> = new Map();
 
@@ -39,7 +41,8 @@ export class QQIABot extends TeamsActivityHandler {
     excelSync: ExcelSyncService,
     notificationService: NotificationService,
     paSyncService?: PowerAutomateSyncService,
-    comSync?: ExcelComSyncService
+    comSync?: ExcelComSyncService,
+    syncEngine?: SyncEngine
   ) {
     super();
     this.dataService = dataService;
@@ -48,6 +51,7 @@ export class QQIABot extends TeamsActivityHandler {
     this.notificationService = notificationService;
     this.paSyncService = paSyncService;
     this.comSync = comSync;
+    this.syncEngine = syncEngine;
 
     // Handle incoming messages
     this.onMessage(async (context, next) => {
@@ -264,7 +268,19 @@ export class QQIABot extends TeamsActivityHandler {
 
     const step = await this.dataService.getStep(stepId);
     if (!step) {
-      await context.sendActivity(`Step **${stepId}** not found. Check the step ID and try again.`);
+      const suggestions = await this.findClosestStepIds(stepId);
+      if (suggestions.length > 0) {
+        await this.sendStepSuggestionCard(
+          context,
+          `Step **${stepId}** not found. Did you mean one of these?`,
+          suggestions.map(suggestion => ({
+            title: suggestion,
+            text: `status ${suggestion}`,
+          }))
+        );
+      } else {
+        await context.sendActivity(`Step **${stepId}** not found. Check the step ID and try again.`);
+      }
       return;
     }
 
@@ -289,16 +305,27 @@ export class QQIABot extends TeamsActivityHandler {
       return;
     }
 
-    let newStatus = 'In Progress';
+    let newStatus = '';
     const lowerText = text.toLowerCase();
     if (lowerText.includes('completed') || lowerText.includes('complete') || lowerText.includes('done')) {
       newStatus = 'Completed';
+    } else if (lowerText.includes('not started') || lowerText.includes('reset') || lowerText.includes('not start')) {
+      newStatus = 'Not Started';
     } else if (lowerText.includes('blocked') || lowerText.includes('block')) {
       newStatus = 'Blocked';
-    } else if (lowerText.includes('in progress') || lowerText.includes('started') || lowerText.includes('start')) {
+    } else if (lowerText.includes('in progress') || lowerText.includes('in-progress') || lowerText.includes('started') || lowerText.includes('start')) {
       newStatus = 'In Progress';
-    } else if (lowerText.includes('not started') || lowerText.includes('reset')) {
-      newStatus = 'Not Started';
+    }
+
+    // If status could not be determined, ask the user to clarify
+    if (!newStatus) {
+      const stepLabel = stepIds.length === 1 ? `step **${stepIds[0]}**` : `steps **${stepIds.join(', ')}**`;
+      await context.sendActivity(
+        `I couldn't recognize the status for ${stepLabel}. Please choose one:\n\n` +
+        `• **Not Started**\n• **In Progress**\n• **Completed**\n• **Blocked**\n\n` +
+        `Example: *update ${stepIds[0]} to Completed*`
+      );
+      return;
     }
 
     const isFed = lowerText.startsWith('fed ');
@@ -310,7 +337,19 @@ export class QQIABot extends TeamsActivityHandler {
       const stepId = stepIds[0];
       const updated = await this.dataService.updateStepStatus(stepId, field as any, newStatus, userName, 'bot');
       if (!updated) {
-        await context.sendActivity(`Step **${stepId}** not found.`);
+        const suggestions = await this.findClosestStepIds(stepId);
+        if (suggestions.length > 0) {
+          await this.sendStepSuggestionCard(
+            context,
+            `Step **${stepId}** not found. Confirm the intended step to apply **${newStatus}** (${track}).`,
+            suggestions.map(suggestion => ({
+              title: `${suggestion} (${track})`,
+              text: `${isFed ? 'fed ' : ''}update ${suggestion} ${newStatus.toLowerCase()}`,
+            }))
+          );
+        } else {
+          await context.sendActivity(`Step **${stepId}** not found.`);
+        }
         return;
       }
 
@@ -330,9 +369,13 @@ export class QQIABot extends TeamsActivityHandler {
         // Sync failed — will show reminder below
       }
 
-      let msg = `✅ Step **${stepId}** ${track} status updated to **${newStatus}** by ${userName}.`;
+      // Export staging file for Excel Online sync
+      try { await this.syncEngine?.exportStagingFile(); } catch { /* non-critical */ }
+
+      const statusIcon = newStatus === 'Completed' ? '🟢' : newStatus === 'In Progress' ? '🔄' : newStatus === 'Not Started' ? '⏳' : '🛑';
+      let msg = `✅ Step **${stepId}** ${track} status updated to ${statusIcon} **${newStatus}** by ${userName}.`;
       if (newStatus === 'Completed') {
-        msg += `\nCompleted date set to ${new Date().toISOString().split('T')[0]}.`;
+        msg += `\n🟢 Completed date set to ${new Date().toISOString().split('T')[0]}.`;
       }
       if (excelSynced) {
         msg += `\n📊 Excel file updated.`;
@@ -387,10 +430,14 @@ export class QQIABot extends TeamsActivityHandler {
       }
     } catch { /* sync failed */ }
 
-    let msg = `✅ **Batch update**: ${succeeded.length} step(s) set to **${newStatus}** (${track}) by ${userName}.`;
+    // Export staging file for Excel Online sync
+    try { await this.syncEngine?.exportStagingFile(); } catch { /* non-critical */ }
+
+    const batchIcon = newStatus === 'Completed' ? '🟢' : newStatus === 'In Progress' ? '🔄' : newStatus === 'Not Started' ? '⏳' : '🛑';
+    let msg = `✅ **Batch update**: ${succeeded.length} step(s) set to ${batchIcon} **${newStatus}** (${track}) by ${userName}.`;
     if (succeeded.length > 0) msg += `\n Updated: ${succeeded.join(', ')}`;
     if (failed.length > 0) msg += `\n⚠️ Not found: ${failed.join(', ')}`;
-    if (newStatus === 'Completed') msg += `\nCompleted date set to ${new Date().toISOString().split('T')[0]}.`;
+    if (newStatus === 'Completed') msg += `\n🟢 Completed date set to ${new Date().toISOString().split('T')[0]}.`;
 
     if (excelSynced) {
       msg += `\n📊 Excel file updated.`;
@@ -773,12 +820,12 @@ export class QQIABot extends TeamsActivityHandler {
     // Check if message contains "to" pattern like "update 1.C to completed"
     // Also handle batch: "mark 1.A, 1.B, 1.C as completed"
     const allIds = this.extractAllStepIds(text);
-    const hasStatusWord = /\b(completed|complete|done|in progress|blocked|not started|reset)\b/.test(text);
+    const hasStatusWord = /\b(completed|complete|done|in progress|in-progress|blocked|not started|reset|start|started)\b/.test(text);
     if (allIds.length > 0 && hasStatusWord) {
       await this.handleStatusUpdate(context, text, userName);
       return;
     }
-    if (stepId && (text.includes(' to ') || hasStatusWord)) {
+    if (stepId && (text.includes(' to ') || text.includes(' as ') || hasStatusWord)) {
       await this.handleStatusUpdate(context, text, userName);
       return;
     }
@@ -1557,6 +1604,10 @@ export class QQIABot extends TeamsActivityHandler {
         }
         break;
 
+      case 'dismiss_suggestion':
+        await context.sendActivity('Okay. Please retype the step ID when you are ready.');
+        break;
+
       default:
         await context.sendActivity(`Unknown action: ${data.action}. Type **help** for commands.`);
     }
@@ -1610,6 +1661,10 @@ export class QQIABot extends TeamsActivityHandler {
           context.activity.value = undefined; // Clear to prevent re-entering action handler
           await this.handleMessage(context);
         }
+        return { statusCode: 200, type: 'application/vnd.microsoft.activity.message', value: '' };
+
+      case 'dismiss_suggestion':
+        await context.sendActivity('Okay. Please retype the step ID when you are ready.');
         return { statusCode: 200, type: 'application/vnd.microsoft.activity.message', value: '' };
 
       default:
@@ -1676,6 +1731,54 @@ export class QQIABot extends TeamsActivityHandler {
       }
     }
     return best;
+  }
+
+  private async findClosestStepIds(stepId: string, maxResults: number = 3): Promise<string[]> {
+    const normalizedTarget = stepId.toUpperCase();
+    const compactTarget = normalizedTarget.replace(/[^A-Z0-9]/g, '');
+    const targetPrefix = normalizedTarget.split('.')[0];
+    const allSteps = await this.dataService.getAllSteps();
+
+    return allSteps
+      .map(step => {
+        const candidate = step.id.toUpperCase();
+        const compactCandidate = candidate.replace(/[^A-Z0-9]/g, '');
+        const samePrefix = candidate.split('.')[0] === targetPrefix;
+        const rawDistance = QQIABot.levenshtein(normalizedTarget, candidate);
+        const compactDistance = QQIABot.levenshtein(compactTarget, compactCandidate);
+        const score = Math.min(rawDistance, compactDistance) + (samePrefix ? 0 : 2);
+        return { id: step.id, score, samePrefix };
+      })
+      .filter(candidate => candidate.score <= 3 && (candidate.samePrefix || candidate.score <= 2))
+      .sort((left, right) => left.score - right.score || left.id.localeCompare(right.id))
+      .slice(0, maxResults)
+      .map(candidate => candidate.id);
+  }
+
+  private async sendStepSuggestionCard(
+    context: TurnContext,
+    prompt: string,
+    suggestions: Array<{ title: string; text: string }>
+  ): Promise<void> {
+    const card = {
+      type: 'AdaptiveCard',
+      $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
+      version: '1.5',
+      body: [
+        { type: 'TextBlock', text: prompt, wrap: true },
+        { type: 'TextBlock', text: 'Choose a suggestion below or retype the step ID.', wrap: true, isSubtle: true, spacing: 'Small' },
+      ],
+      actions: [
+        ...suggestions.map(suggestion => ({
+          type: 'Action.Submit',
+          title: suggestion.title,
+          data: { action: 'quick_action', text: suggestion.text },
+        })),
+        { type: 'Action.Submit', title: 'Cancel', data: { action: 'dismiss_suggestion' } },
+      ],
+    };
+
+    await context.sendActivity(MessageFactory.attachment(CardFactory.adaptiveCard(card)));
   }
 
   /** Extract step ID from user message (e.g., "1.A", "2.B.1") — handles spaces around dots and normalizes to uppercase */
